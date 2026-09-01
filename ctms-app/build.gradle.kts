@@ -1,23 +1,25 @@
 plugins {
     id("org.springframework.boot")
-    id("org.graalvm.buildtools.native")
 }
 
 dependencies {
     // Composition root — the only module that knows about all the others (spec §8).
-    implementation(project(":ctms-common"))
-    implementation(project(":ctms-security"))
-    implementation(project(":ctms-persistence"))
-    implementation(project(":ctms-trials"))
-    implementation(project(":ctms-clinical"))
-    implementation(project(":ctms-safety"))
-    implementation(project(":ctms-ethics"))
-    implementation(project(":ctms-documents"))
-    implementation(project(":ctms-gis"))
-    implementation(project(":ctms-analytics"))
+    implementation(projects.ctmsCommon)
+    implementation(projects.ctmsSecurity)
+    implementation(projects.ctmsPersistence)
+    implementation(projects.ctmsTrials)
+    implementation(projects.ctmsClinical)
+    implementation(projects.ctmsSafety)
+    implementation(projects.ctmsEthics)
+    implementation(projects.ctmsDocuments)
+    implementation(projects.ctmsGis)
+    implementation(projects.ctmsAnalytics)
 
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    // The composition root hosts the Spring Security filter chain, so the
+    // security types are part of its own compile classpath, not just ctms-security's.
+    implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("io.micrometer:micrometer-registry-prometheus")
@@ -40,12 +42,3 @@ dependencies {
     testImplementation("org.testcontainers:testcontainers-postgresql")
 }
 
-// Spec §5.2: native image is built in CI from day one so AOT drift surfaces
-// in the PR that caused it, not in B9.
-graalvmNative {
-    binaries {
-        named("main") {
-            imageName.set("ctms")
-        }
-    }
-}

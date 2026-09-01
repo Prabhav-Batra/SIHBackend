@@ -15,6 +15,11 @@ dependencyResolutionManagement {
     repositories { mavenCentral() }
 }
 
+// Type-safe project accessors: `projects.ctmsCommon` instead of `project(":ctms-common")`.
+// The string form resolves to Project-as-dependency-notation, deprecated in Gradle 9 and
+// an error in Gradle 10.
+enableFeaturePreview("TYPESAFE_PROJECT_ACCESSORS")
+
 rootProject.name = "ctms-backend"
 
 // Eleven modules — spec §8. Only ctms-app is bootable; the rest are libraries,
