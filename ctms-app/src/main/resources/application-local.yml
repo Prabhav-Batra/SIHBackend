@@ -1,0 +1,9 @@
+# Local development against docker-compose.yml.
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ctms
+    username: ctms
+    password: ctms
+logging:
+  level:
+    org.flywaydb: DEBUG

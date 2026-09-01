@@ -1,0 +1,17 @@
+# Deployed profile: Oracle Always Free VM -> Supabase Postgres (spec §4).
+spring:
+  datasource:
+    # Supavisor, transaction mode. prepareThreshold=0 is required: transaction pooling
+    # and server-side prepared statements do not mix (spec §6.2).
+    url: ${CTMS_DB_URL}?prepareThreshold=0&sslmode=require
+    username: ${CTMS_DB_USER}
+    password: ${CTMS_DB_PASSWORD}
+    hikari:
+      maximum-pool-size: ${CTMS_DB_POOL_MAX:10}
+  jpa:
+    properties:
+      hibernate:
+        query.plan_cache_max_size: 512
+logging:
+  level:
+    root: INFO
