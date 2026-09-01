@@ -1,7 +1,6 @@
 plugins {
     java
     id("org.springframework.boot") version "4.1.1" apply false
-    id("org.graalvm.buildtools.native") version "0.11.0" apply false
 }
 
 // Spec §5: Java 26, latest release. One line to move to 25 LTS if EOL (Mar 2027) bites.

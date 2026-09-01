@@ -54,12 +54,12 @@ endpoint is an index or a materialized view, never a cache entry.
 | Compose | postgres+postgis, redis, clamav, prometheus, grafana for local dev |
 | Migrations | Flyway wired, `V1__baseline.sql` empty, PostGIS extension enabled |
 | Endpoints | Actuator `/health/liveness`, `/health/readiness` |
-| CI | Spotless, Error Prone, `./gradlew test`, `gitleaks`, Flyway migrate + clean check, **and `nativeCompile`** |
+| CI | `./gradlew build`, `gitleaks`, Flyway migrate-from-empty via the acceptance test |
 | Infra | Oracle Always Free VM provisioned; ARM capacity confirmed in-region (spec §15.4) |
 
-**Done when** — readiness returns 200 in CI, the native binary boots and answers `/health/liveness`, and Flyway migrates cleanly from empty.
+**Done when** — readiness returns 200 in CI and Flyway migrates cleanly from empty.
 
-> Native image builds from day one, not phase nine. Spec §5.2: AOT drift found in B9 is a scramble; found in B1 it is a config line.
+> **No native image.** GraalVM publishes no Java 26 build (Oracle serves 24 and 25; Community's newest is 25), so "latest Java" and "native image" are mutually exclusive today. The deployable is the fat jar — on a 24 GB always-on VM, native's heap and cold-start wins do not apply.
 
 ---
 
@@ -117,7 +117,6 @@ endpoint is an index or a materialized view, never a cache entry.
 | Concurrency | `ETag` on reads, `If-Match` required on updates (§14.4) |
 | Lifecycle | Trial state machine `DRAFT → ACTIVE → COMPLETED → ARCHIVED` (§20.2) |
 | Layering | `controller → service → repository` established here as the pattern every later module copies |
-| AOT | First real Hibernate + PostGIS native-image test — spec §15.3 flags this as the likeliest missing-hint site |
 
 **Done when** — `trial_staff` assignments visibly change what `GET /trials` returns, with no scope filtering written in the query.
 
@@ -201,12 +200,12 @@ Independent of one another; one per team member.
 | Rate limits | **Bucket4j in-memory** (spec §9.2), tiered by threat: strict on `/auth/*`, on `participant_identity:read`, and on `gis:drilldown`; generous on ordinary reads |
 | Audit | Every §19.2 event covered including the three audited reads (§19.3); PHI redaction in `old_values`/`new_values` (§19.5) |
 | Security tests | The full §27.4 suite — authorization matrix, RLS bypass attempts, upload abuse, rate limiting, CSRF, plus the GUC leak test |
-| Deploy | Compose on the Oracle VM (app + Redis + ClamAV + Prometheus + Grafana); Caddy TLS; Vercel rewrite proxying `/api/*` (spec §6.4) |
+| Deploy | Compose on the Oracle VM (fat jar + Redis + ClamAV + Prometheus + Grafana); Caddy TLS; Vercel rewrite proxying `/api/*` (spec §6.4) |
 | Keep-alives | Scheduled Supabase query (7-day pause) and health ping — both are deliverables, not afterthoughts |
 | Backups | Self-managed `pg_dump` to object storage; free Supabase has none. **Run a restore drill** |
 | Load proof | k6 against a locally seeded 50–100M observation dataset: p50/p95/p99 and RPS per endpoint class, plus the saturation point *and its cause*. Grafana captures into the README |
 
-**Done when** — the security suite passes in CI, a restore has actually been performed, the deployed native binary serves the Vercel frontend end to end, and the load numbers are published.
+**Done when** — the security suite passes in CI, a restore has actually been performed, the deployed application serves the Vercel frontend end to end, and the load numbers are published.
 
 ---
 
@@ -231,5 +230,4 @@ Independent of one another; one per team member.
 | Tests with the PR | An endpoint PR ships its API test, and any RLS-scoped table registers with the scope harness |
 | Thin controllers | No business logic or SQL in controllers; transactions open in services |
 | No role names in code | Gate on permissions only, enforced by ArchUnit (§6.1) |
-| AOT-clean | No runtime reflection without a registered hint — `nativeCompile` runs in CI on every PR |
 | Definition of done | Merged · tests green · migration applied cleanly · in OpenAPI · permission in the catalogue |

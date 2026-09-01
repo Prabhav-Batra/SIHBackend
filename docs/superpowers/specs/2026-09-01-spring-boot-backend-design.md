@@ -94,7 +94,7 @@ flowchart TB
     V -->|"same-site /api/*"| O
 
     subgraph O["Oracle Cloud Always Free — 4 ARM cores / 24 GB"]
-      APP["Spring Boot<br/>native image"]
+      APP["Spring Boot<br/>fat jar"]
       R["Redis<br/>(co-located)"]
       C["ClamAV"]
       APP --- R
@@ -141,7 +141,7 @@ retained in configuration as a managed fallback.
 | API docs | springdoc-openapi | Generates the frontend's typed client |
 | Tests | JUnit 5, Testcontainers, RestAssured | §13 |
 | Load | k6 | §13.3 |
-| Packaging | **GraalVM native image** via Spring AOT | JVM for local dev, native in CI (§5.2) |
+| Packaging | **Executable fat jar** | GraalVM has no Java 26 build (§5.2) |
 
 ### 5.1 Virtual threads, not WebFlux
 
@@ -150,13 +150,19 @@ context (§6.2) substantially harder. Project Loom delivers equivalent concurren
 blocking JDBC and ordinary `@Transactional`. WebFlux here would trade the security model
 for throughput that virtual threads provide free.
 
-### 5.2 Native image policy
+### 5.2 Packaging: fat jar, not native image
 
-Local development runs the plain JVM for iteration speed. CI produces both a fat jar and a
-GraalVM native image; the native image is what deploys. Code stays AOT-clean throughout —
-no runtime reflection without a registered hint — so the native build never diverges from
-what was developed. Hibernate and Spring Data AOT hints are maintained as a first-class
-part of the build, not a phase-9 scramble.
+Native image was specified while the deployment target was a 512 MB host, where a ~80 MB
+resident set and a sub-second start were decisive. Choosing Oracle Always Free (24 GB, no
+spin-down) removed both reasons.
+
+It is also not currently possible. GraalVM publishes no Java 26 build — Oracle serves 24 and
+25, and GraalVM Community's newest is 25 — so "latest Java" and "native image" are mutually
+exclusive as of this writing. Given the benefits had already gone, Java 26 wins and the
+deployable is the fat jar.
+
+Revisit only if the deployment target changes to a memory-constrained or scale-to-zero host,
+at which point moving to Java 25 LTS buys native image back.
 
 ---
 
@@ -378,6 +384,7 @@ with Grafana captures.
 | 15 | Read replicas on the production path | Seam built, single datasource | Not on free Supabase |
 | 18.3 | `SameSite=Lax` | Unchanged — **preserved via Vercel proxy** | Would have broken cross-site (§6.4) |
 | 26 | 13 full-stack phases | Backend phases, re-scoped | Backend-only plan |
+| — | GraalVM native image | Fat jar | No GraalVM build exists for Java 26 (§5.2) |
 | 29 | Docker Compose on one VM | Compose on Oracle Always Free + Supabase | Free tier |
 | 29.6 | Nightly `pg_dump` + restore drill | Self-managed dump to object storage | Supabase free has no backups |
 
@@ -393,11 +400,9 @@ and participant pseudonymisation (ADR-011).
    final shape of the worker identity.
 2. Supavisor transaction-mode behaviour with Hibernate's statement cache disabled; measure
    the cost.
-3. GraalVM native image with Hibernate + PostGIS types — the JTS/geometry mapping is the
-   likeliest source of missing AOT hints.
-4. Oracle ARM capacity in the target region; if unavailable, fall back to Koyeb, at which
-   point the native image stops being optional and Redis moves to Upstash.
-5. Actual row sizing against the 500 MB ceiling once indexes and partitions exist.
+3. Oracle ARM capacity in the target region; if unavailable, fall back to Koyeb, at which
+   point packaging must be revisited (Java 25 LTS + native image) and Redis moves to Upstash.
+4. Actual row sizing against the 500 MB ceiling once indexes and partitions exist.
 
 ---
 

@@ -26,24 +26,3 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Spec §5.2: native image is built from B1, so a missing AOT hint fails the PR
-  # that introduced it rather than surfacing in B9.
-  native:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: graalvm/setup-graalvm@v1
-        with:
-          java-version: '26'
-          distribution: graalvm
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: gradle/actions/setup-gradle@v4
-
-      - name: Native compile
-        working-directory: backend
-        # --no-configuration-cache: the GraalVM plugin cannot serialize
-        # ConfigurationContainer into the configuration cache.
-        run: ./gradlew :ctms-app:nativeCompile --no-configuration-cache --stacktrace

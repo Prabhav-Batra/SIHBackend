@@ -21,9 +21,7 @@ cd backend
 
 ```bash
 ./gradlew build                 # compile + tests (Testcontainers needs Docker running)
-# GraalVM native binary. --no-configuration-cache is required: the GraalVM
-# plugin cannot serialize ConfigurationContainer into the configuration cache.
-./gradlew :ctms-app:nativeCompile --no-configuration-cache
+./gradlew :ctms-app:bootJar        # the deployable fat jar
 ```
 
 ## Modules
@@ -54,5 +52,5 @@ prevents a domain module from quietly acquiring a dependency on the web layer.
 - **Tests use Testcontainers, not an embedded database.** From B3 the things worth testing
   (RLS policies, partitions, spatial types) do not exist outside PostgreSQL.
 - **`-parameters` is on.** Spring needs it for constructor binding on records.
-- **Code stays AOT-clean.** No runtime reflection without a registered hint; `nativeCompile`
-  runs in CI on every PR so drift fails the PR that caused it.
+- **No GraalVM native image.** GraalVM has no Java 26 build, and its benefits (heap
+  footprint, cold start) do not apply to a 24 GB always-on VM. The deployable is the fat jar.
