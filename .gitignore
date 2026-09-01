@@ -1,8 +1,18 @@
-# Gradle
+# Java / Gradle
 .gradle/
 build/
 */build/
 !gradle/wrapper/gradle-wrapper.jar
+**/.gradle/
+**/build/
+**/bin/
+*.class
+out/
+bin/
+
+# Environment
+.env
+.env.local
 
 # IDEs
 .idea/
@@ -13,13 +23,11 @@ build/
 .settings/
 .classpath
 .project
-bin/
-out/
-
-# Environment variables
-.env
-.env.local
 
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Node / Next.js (frontend arrives later)
+node_modules/
+.next/

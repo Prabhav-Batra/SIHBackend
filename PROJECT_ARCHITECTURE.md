@@ -8,22 +8,49 @@ GIS: Enabled
 Primary Database: PostgreSQL
 Cache: Redis
 File Storage: Cloudinary
-Backend: FastAPI
+Backend: Spring Boot (Java 26) — supersedes FastAPI, see banner below
 Frontend: Next.js
 
 ---
 
 ## Document Status
 
-This document is the single source of truth for the technical architecture of the
-SIH26046 platform. It defines *what* is built and *how the pieces fit together*.
-It deliberately contains no implementation code — each build phase in §26 gets its
-own implementation plan written against this document.
+This document is the single source of truth for the *domain and security* architecture
+of the SIH26046 platform. It defines *what* is built and *how the pieces fit together*.
+It deliberately contains no implementation code.
+
+> [!IMPORTANT]
+> **Backend technology superseded — 2026-09-01.** The backend is **Java 26 /
+> Spring Boot 4.1**, not FastAPI, and deploys to free-tier infrastructure
+> (Oracle Always Free + Supabase + Vercel). The replacement design is
+> [docs/superpowers/specs/2026-09-01-spring-boot-backend-design.md](docs/superpowers/specs/2026-09-01-spring-boot-backend-design.md),
+> and build phases are in [BACKEND_PHASES.md](BACKEND_PHASES.md).
+>
+> **Still authoritative — §5 through §23.** Roles, the RBAC permission catalogue, RLS
+> policy design, the 23-table schema, GIS privacy and k-anonymity, consistency rules,
+> and audit requirements are unchanged. So are ADR-001 through ADR-012 in §31.
+>
+> **Superseded — read the spec instead.**
+>
+> | § | Was | Now |
+> |---|---|---|
+> | 3.2 | FastAPI, SQLAlchemy, Alembic | Spring Boot 4.1, Hibernate, Flyway |
+> | 3.5 | Celery + Redis broker | Postgres job queue (`SKIP LOCKED`) — no Kafka |
+> | 7.7 | `ctms_worker` holds `BYPASSRLS` | Explicit policies / `SECURITY DEFINER` — Supabase grants no superuser |
+> | 12 | Redis as primary cache | Caffeine L1, Redis L2 |
+> | 15 | Read replicas on the production path | Seam built, single datasource on free tier |
+> | 24 | `backend/app/` Python tree | Eleven-module Gradle build |
+> | 26 | 13 full-stack phases | 9 backend phases in BACKEND_PHASES.md |
+> | 29 | Compose on a generic VM | Oracle Always Free + Supabase + Vercel |
+>
+> Every deviation is enumerated with its reason in the spec's §14. The scale target was
+> also restated: the system is sized for ~10³ concurrent staff against ~10⁹ clinical
+> rows, not for one million users — see the spec's §3.
 
 | Field | Value |
 |---|---|
 | Problem statement | SIH26046 |
-| Document version | 1.0 |
+| Document version | 1.1 — backend stack superseded |
 | Last updated | 2026-09-01 |
 | Core tables | 23 (see §8) |
 | Roles | 7 |
