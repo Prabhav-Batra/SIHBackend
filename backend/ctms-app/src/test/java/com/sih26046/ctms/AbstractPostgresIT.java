@@ -1,6 +1,8 @@
 package com.sih26046.ctms;
 
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
@@ -22,5 +24,13 @@ public abstract class AbstractPostgresIT {
 
     static {
         POSTGRES.start();
+    }
+
+    /** A test-only signing key. Production has no default and fails fast without one. */
+    @DynamicPropertySource
+    static void authProperties(DynamicPropertyRegistry registry) {
+        registry.add(
+                "ctms.auth.jwt-secret",
+                () -> "integration-test-signing-key-at-least-32-bytes");
     }
 }
