@@ -8,10 +8,14 @@ spring:
     virtual:
       enabled: true
 
+  # Two identities, deliberately (§7.7). The application pool connects as the unprivileged
+  # ctms_app, which owns nothing and is therefore constrained by every policy. Migrations run
+  # as the owner. Pointing the application at the owner would disable RLS everywhere at once,
+  # silently — RlsConnectionGuard refuses to start if that happens.
   datasource:
     url: ${CTMS_DB_URL:jdbc:postgresql://localhost:5432/ctms}
-    username: ${CTMS_DB_USER:ctms}
-    password: ${CTMS_DB_PASSWORD:ctms}
+    username: ${CTMS_DB_APP_USER:ctms_app}
+    password: ${CTMS_DB_APP_PASSWORD:ctms_app}
     hikari:
       maximum-pool-size: ${CTMS_DB_POOL_MAX:10}
       pool-name: ctms-pool
@@ -29,6 +33,9 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+    # The owner: creates tables, policies, grants, and the ctms_app role itself (V5).
+    user: ${CTMS_DB_OWNER_USER:ctms}
+    password: ${CTMS_DB_OWNER_PASSWORD:ctms}
 
 # §18.2 — token design.
 ctms:

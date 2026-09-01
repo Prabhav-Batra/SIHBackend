@@ -1,8 +1,15 @@
 # Local development against docker-compose.yml.
+#
+# The compose superuser (ctms) owns the schema and runs migrations; the application connects
+# as ctms_app, which V5 creates. Running locally as the owner would mean developing against a
+# database with no row-level security and discovering the difference in production.
 spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/ctms
-    username: ctms
+    username: ctms_app
+    password: ctms_app
+  flyway:
+    user: ctms
     password: ctms
 logging:
   level:
