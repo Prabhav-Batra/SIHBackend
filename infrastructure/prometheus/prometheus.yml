@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: ctms
+    metrics_path: /actuator/prometheus
+    static_configs:
+      # host.docker.internal so Prometheus in Compose can reach a locally run app.
+      - targets: ["host.docker.internal:8080"]

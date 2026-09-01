@@ -1,0 +1,58 @@
+# Local development stack. The deployed topology (Oracle Always Free VM + Supabase)
+# is docker-compose.prod.yml, added in B9 — see spec §4.
+services:
+  postgres:
+    image: postgis/postgis:17-3.5
+    environment:
+      POSTGRES_DB: ctms
+      POSTGRES_USER: ctms
+      POSTGRES_PASSWORD: ctms
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ctms -d ctms"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Co-located, not Upstash: the free Upstash tier allows 500k commands/month
+  # (~11/min) and adds a cross-internet round trip to every cache read (spec §4).
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    ports: ["6379:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # Fits comfortably in the Oracle VM's 24 GB; restored from the spec's §11
+  # after the 512 MB hosts were ruled out.
+  clamav:
+    image: clamav/clamav:stable
+    ports: ["3310:3310"]
+    healthcheck:
+      test: ["CMD", "clamdscan", "--ping", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports: ["9090:9090"]
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  grafana:
+    image: grafana/grafana:latest
+    ports: ["3001:3000"]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    depends_on: [prometheus]
+
+volumes:
+  pgdata:
