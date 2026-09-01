@@ -30,6 +30,15 @@ spring:
     enabled: true
     locations: classpath:db/migration
 
+# §18.2 — token design.
+ctms:
+  auth:
+    # Intentionally has NO default. An application that cannot find a signing secret must
+    # refuse to start rather than fall back to one committed to the repository.
+    jwt-secret: ${CTMS_JWT_SECRET}
+    access-token-ttl: ${CTMS_JWT_ACCESS_TTL:15m}
+    refresh-token-ttl: ${CTMS_JWT_REFRESH_TTL:14d}
+
 management:
   endpoints:
     web:
