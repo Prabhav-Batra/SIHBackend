@@ -5,10 +5,11 @@
 > load-bearing, and — most valuably — the traps that already cost time. Update it at every
 > phase commit.
 
-**Last updated:** 2026-09-02, after `96ef7ba`.
-**State:** B1–B6b complete. B6c is done except the orphan sweep and the real-ClamAV test.
-**Tests:** 203 in the default suite + 2 `external`, all green.
-**Next:** orphan sweep (§16.7) · `ClamAvScanIT` against a live clamd · then B7 GIS.
+**Last updated:** 2026-09-03. B8 (Analytics + Caching) complete — **uncommitted**, along with
+B6c's remainder and B7 from earlier in this session.
+**State:** B1–B8 complete.
+**Tests:** 225 in the default suite + 4 `external`, all green.
+**Next:** B9 — hardening, CSRF, deploy, the load test that finally decides partitioning (§13).
 
 ---
 
@@ -41,10 +42,10 @@ domain spec wins on *what*.
 | B6c | Documents — upload, Tika sniffing, checksum, scan queue, quarantine | done · `278614a` |
 | B6c | Version chain, signed download, first audit writes | done · `853fc59` |
 | B6c | Cloudinary backend, verified live | done · `96ef7ba` |
-| **B6c** | **remainder — orphan sweep, real-ClamAV EICAR test** | **next** |
-| B7 | GIS | not started |
-| B8 | Analytics, caching, partitioning decision | not started |
-| B9 | Hardening, CSRF, deploy | not started |
+| B6c | Orphan sweep (§16.7), real-ClamAV EICAR test | done · uncommitted |
+| B7 | GIS — base map, clustering, k-anonymity aggregates, drill-down | done · uncommitted |
+| B8 | Analytics dashboard, rollup materialized view, Caffeine cache, audit endpoint | done · uncommitted |
+| **B9** | **Hardening, CSRF, deploy** | **not started · next** |
 
 ---
 
@@ -337,6 +338,12 @@ version ships.
 | V17 | ethics per-command policies; PI withdraw pinned to destination status |
 | V18 | `compliance:read` for ETHICS_MEMBER and SAFETY_OFFICER |
 | V19 | `app.document_storage_handle` and `app.record_scan_result` — how the scan worker touches RLS-protected rows |
+| V20 | `app.referenced_storage_public_ids` — how the orphan sweep touches RLS-protected rows |
+| V21 | Fixes `trial_sites_located`'s accidental RLS bypass (`security_invoker = true`) |
+| V22 | `app.suppress_small` — k-anonymity suppression (§11.4) |
+| V23 | `app.gis_site_markers`, `app.gis_area_aggregates` — the global GIS base map and Level-1 aggregates |
+| V24 | `app.gis_may_see_trial_safety` — tells "no events" from "not visible to you" apart at GIS drill-down |
+| V25 | `mv_trial_rollup`, `app.trial_rollup_source`, `app.refresh_trial_rollup` — the dashboard read model |
 
 ---
 
@@ -348,15 +355,15 @@ version ships.
 | Table partitioning | B8, after profiling. Moved out of B3 deliberately. |
 | CSRF | B9. Currently disabled at `SecurityConfig.java:36`, with a pointer to §18.12. |
 | RLS on `trial_compliance` is looser than RBAC | Intentional. §5.8 gives PI/COORD `compliance:read` only; the API is the narrower layer. Narrower is the safe direction. |
-| `CloudinaryStorageBackend.exists()` treats any failure as "absent" | Acceptable only because its callers re-check. If the orphan sweep ever deletes on the strength of this alone, a network fault becomes data loss — make it distinguish NotFound from everything else first. |
+| `CloudinaryStorageBackend.exists()` treats any failure as "absent" | Did not become the orphan sweep's problem: the sweep (§16.7, built) decides orphan status from `storage.list()` cross-referenced against `app.referenced_storage_public_ids()`, never from a per-object `exists()` probe, so a network fault during the sweep fails the whole run closed (§10) rather than misreading one object as absent. The method itself is still unsafe for any future caller that needs to tell "gone" from "could not check" apart — fix that before relying on it for anything that deletes. |
 | `DocumentScanScheduler` polls every 5 s on one instance | Fine now. A second instance is safe (`SKIP LOCKED` handles it) but doubles the poll rate; move to a longer interval or `LISTEN/NOTIFY` if that matters. |
 
 ---
 
-## 10 · B6c — what is built, and what is left
+## 10 · B6c — what is built
 
 **Goal:** `/documents`. Upload validation, async malware scan, quarantine until clean,
-immutable version chain, short-lived signed download.
+immutable version chain, short-lived signed download, orphan cleanup. **Complete.**
 
 ### Built
 
@@ -365,9 +372,10 @@ immutable version chain, short-lived signed download.
 | `StorageBackend` + `LocalStorageBackend` + `CloudinaryStorageBackend` | Selected by `ctms.documents.storage-backend`. |
 | Upload through the backend | §16.7 settles it — "the upload writes to Cloudinary *before* the transaction commits… the handler deletes the asset in its exception path" is server-side. "Signed upload" means the server signs its own API call. Spooled to a temp file, never buffered in heap. |
 | Validation (§16.5) | Size · extension allowlist · **content sniff** · filename sanitisation · SHA-256. |
-| Scan pipeline | `DocumentScanWorker` drains `DOCUMENT_SCAN`; `PENDING_SCAN` → `CLEAN`/`INFECTED`. An infected asset's bytes are **deleted**, not merely flagged. |
+| Scan pipeline | `DocumentScanWorker` drains `DOCUMENT_SCAN`; `PENDING_SCAN` → `CLEAN`/`INFECTED`. An infected asset's bytes are **deleted**, not merely flagged. Proven against a real `clamav/clamav` container by `ClamAvScanIT` (tagged `external`), not only the scripted verdict in `DocumentUploadIT`. |
 | Version chain (§17.2) | `document_family_id` groups versions; v1 sets it to its own id. |
 | Signed download (§16.4) | 302, 300 s, audited, never cached. |
+| Orphan sweep (§16.7) | `DocumentOrphanSweepWorker.sweep()`, timed by `DocumentOrphanSweepScheduler` (nightly, off in tests). Lists the storage backend's own namespace via the new `StorageBackend.list()`, diffs against `app.referenced_storage_public_ids()` (V20), deletes anything unreferenced older than `ctms.documents.orphan-sweep.min-age` (default 24 h). |
 
 **Content sniffing runs on content only.** Tika is never given the filename as a hint — a
 detector told what to expect agrees with an attacker's chosen extension and the check becomes a
@@ -392,20 +400,178 @@ is what makes §16.4's five minutes real rather than aspirational. `CloudinarySt
 it against the live service: a valid link serves the bytes, a tampered one and an expired one do
 not. Credentials are in `backend/.env` and verified.
 
-### Left
+### How the last two pieces were proven
 
-1. **Orphan sweep** (§16.7). A nightly job listing assets in the trial namespace, comparing
-   against `documents.cloudinary_public_id`, removing anything unreferenced for more than 24
-   hours. The delay avoids racing an in-flight upload.
-2. **`ClamAvScanIT`** — one test against a real `clamav/clamav` container asserting an EICAR
-   upload never leaves `QUARANTINED`. The fake in `DocumentUploadIT` proves the state machine
-   and nothing about detection, and "an infected upload never reaches AVAILABLE" is B6's stated
-   done-condition. Expect a ~1 GB one-time image pull and ~40 s for clamd to load signatures, so
-   tag it `external` alongside the Cloudinary tests.
+**Orphan sweep.** `DocumentOrphanSweepIT` (default suite, real Postgres, local storage
+backend) covers the three cases that matter: an object still referenced by a `documents` row
+survives even when its file is backdated past the grace period (this is also the test that
+would fail first if V20's SECURITY DEFINER function stopped seeing past RLS — a worker with no
+bound identity would then read "referenced" as empty and delete it anyway); a fresh,
+genuinely unreferenced object survives because it might just be a commit that has not landed
+yet; and only an unreferenced object past the grace period is actually removed.
+
+**`ClamAvScanIT`** (tagged `external`, `./gradlew externalTest`) runs an EICAR upload — the
+standard antivirus test string, uploaded as `eicar.csv` because Tika sniffs plain ASCII as
+`text/plain`, which the CSV allowlist already accepts — through the real `DocumentScanWorker`
+against a real `clamav/clamav:stable` container (`Wait.forHealthcheck()`, matching the image's
+own healthcheck used in `docker-compose.yml`, plus a `ping()` retry loop before any test runs).
+Asserts `QUARANTINED`, bytes deleted, and — through the actual endpoint, not just internal
+state — that `GET /documents/{id}/download` on a quarantined document is `409`, never a
+redirect. A companion test scans a genuine clean PDF, so the suite cannot pass by a scanner
+that always says INFECTED. Expect a ~1 GB one-time image pull and well under a minute for
+clamd to answer once pulled — both tests together run in a few seconds after that.
 
 ---
 
-## 11 · Standing constraints
+## 11 · B7 — GIS
+
+**Goal:** `/gis`. One map, seven roles (§1.3, §10, §11). **Complete.**
+
+### The design problem B7 actually was
+
+The domain spec's SQL examples (§10.3, §11.4) query `trial_sites`/`trial_compliance` directly
+and assume that returns the right rows for every role. It does not: those tables' RLS is
+*clinical* scoping — who may work on this trial — built in B4 for `/sites` and `/compliance`,
+and §11.3 requires something different at Level 0/1: a Research Staff member scoped to one
+site still sees the *national* base map, and an Ethics Member (whose RLS reaches nothing on
+`trials` at all, an existing B4 gap — see below) still sees aggregate figures. Loosening the
+clinical policies to get there would also loosen `/sites` and `/compliance` themselves, since
+RLS is table-wide, not endpoint-scoped.
+
+The actual design, then: two SECURITY DEFINER functions (V23) — `app.gis_site_markers()` and
+`app.gis_area_aggregates()` — expose exactly the fields §11.2 lists as public, deliberately
+global, the same pattern V19/V20 already established for background workers with a legitimate
+need that ordinary RLS cannot grant. Level 2/3 drill-down does the opposite on purpose: it
+queries `trial_sites` directly under the caller's own RLS, so an out-of-scope site is a
+genuine 404, not a hidden field.
+
+### A real bug found on the way, fixed before it had a caller
+
+`trial_sites_located` (built in B4, V4) is an ordinary view over two `FORCE ROW LEVEL
+SECURITY` tables. Before PostgreSQL's `security_invoker` option, a view checks its access to
+underlying tables — both grants and row security — as the *view's owner*, not the querying
+role. The owner here is whichever role ran the migrations, and in this project's own
+Testcontainers harness that role is a literal superuser, which bypasses row security
+unconditionally regardless of FORCE (§7.7 — FORCE only ever closes the owner-without-superuser
+loophole). The view would therefore have returned every row to every caller, silently, the
+moment anything queried it under RLS. Nothing had — its one reference was a schema test on the
+unscoped owner connection — but GIS was exactly the kind of consumer that would have reached
+for it next. **V21** sets `security_invoker = true`, closing it before it had a caller.
+
+### What was deliberately left out, and why
+
+| Left out | Why | Undefer when |
+|---|---|---|
+| **`district`-level aggregates** | The schema has only `city` and `state` — no `district` column anywhere. Approximating one from city data would misrepresent a real administrative boundary. `?level=` accepts `state` and `city`; `district` is `422`. | A migration adds a real `district` column to `institutions`/`trial_sites`. |
+| **Aggregate/site-detail adverse-event counts for `REGULATORY_OFFICER`** | `adverse_events_scope` (V11) has no branch for this role at all, on purpose — the migration's own comment says their aggregate safety view is meant to come from a B8 rollup, not row access. `REGULATORY_OFFICER` holds `adverse_event:read` at the RBAC layer regardless (§6.3), so gating on that permission alone would run the count query, get zero rows back from RLS, and report a **false "0"** — indistinguishable from a site where nothing happened. **V24**'s `app.gis_may_see_trial_safety()` restates `adverse_events_scope`'s own predicate so the field can be *omitted* rather than zeroed for this one role. `SAFETY_OFFICER` (unconditional RLS access) and PI/COORDINATOR/RESEARCH_STAFF (via their own scope) get the real count today. | B8 builds the AE rollup; `REGULATORY_OFFICER`'s field can then read from it instead of being absent. |
+| **Materialized views / caching** | Spec §7 and BACKEND_PHASES.md put this in B8 on purpose — profile before caching, and the queries this phase adds are exactly what B8 would need to have stopped changing shape first. Every query here runs live. | B8, after profiling against a seeded dataset. |
+
+### The other RBAC/RLS mismatch this phase surfaced, not fixed
+
+`trials_read` / `trial_sites_read` (V6) have no `ETHICS_MEMBER` branch — only
+`app.reads_all_structure()` (`SYSTEM_ADMIN`, `SAFETY_OFFICER`, `REGULATORY_OFFICER`) or trial
+assignment. `ethics_submissions` RLS *does* scope to the member's institution, but that is a
+different table with no path back to `trials` itself. §5.8's own capability matrix already
+shows `ETHICS_MEMBER` holding no `gis:drilldown`, so this has no practical effect on B7 — the
+role reaches Level 0/1 (global, via V23) same as everyone and was never going to reach Level 2
+regardless. Left as a known B4 gap rather than patched here, since fixing it is a `trials`/
+`trial_sites` RLS change with a blast radius belonging to whoever next needs an Ethics Member
+to read a trial for a non-GIS reason.
+
+### Built
+
+| Piece | Notes |
+|---|---|
+| `app.gis_site_markers()` (V23) | The base map's site layer — location, status, institution — global, no enrolment figure (a single site's raw count on a map every role can open is the exact re-identification risk §11.4 exists to prevent). |
+| `app.gis_area_aggregates(group_by)` (V23) | State/city rollups: structural counts exact, enrolment through `app.suppress_small` (V22, verbatim from §11.4). Reads back as plain `bigint`/`boolean` columns, not jsonb — nothing above the database needs an opinion about which Jackson package Boot 4.1 ships, the same reasoning `DocumentScanWorker`'s payload already uses. |
+| `app.gis_may_see_trial_safety(trial)` (V24) | Lets the drill-down endpoint skip, rather than zero, an adverse-event count the caller's RBAC permission implies but their RLS scope does not back up. |
+| `GisController` / `GisService` (`ctms-gis`) | `/institutions`, `/sites` (bbox/trial/status-filtered in Java — safe only because these are public fields with nothing to suppress), `/clusters` (`ST_ClusterDBSCAN`, SQL, never Java), `/aggregates`, `/sites/{id}/detail`. |
+| Role-aware drill-down composition | Same site, different answer: the assigned investigator gets raw enrolment (they already have it via `/participants`); `SAFETY_OFFICER`/`REGULATORY_OFFICER` (unconditional `trial_sites` read, no clinical stake) get it suppressed under k=5, same as a small aggregate cell. `compliance` is `null` for a caller without `compliance:read` (note: `SAFETY_OFFICER` *has* this, via V18 — a bug in this phase's own first test draft, not in V18). |
+
+**Every `GisService` method is `@Transactional`, and that is load-bearing, not decorative.**
+`RlsAwareTransactionManager` binds `app.current_user_id` only when a Spring-managed transaction
+begins (§4.1) — a bare `JdbcTemplate` call outside one gets a connection with the GUC unset,
+every policy (and V23's own `IS NOT NULL` guards) evaluates false, and the result is an empty
+map, not an error. `ConsentController`/`ParticipantController`'s existing `@Transactional
+(readOnly = true)` on GET methods is this same requirement; it just had no comment explaining
+why until this phase needed to get it right from scratch.
+
+**Test isolation trap, caught before it shipped:** `GisApiIT`'s aggregate tests group by a
+fresh random state/city per test method, not a fixed name — the shared Postgres container
+persists across methods in the class, and a fixed name let one test's enrolment leak into
+another's tally on the first run. The clustering test needed the same fix a second way: its
+fixture institutions sit at genuinely random coordinates unrelated to any other fixture in the
+file, because the base map is deliberately global and a wide bbox otherwise sweeps up whatever
+every other method in the class created at the same fixed Delhi/Mumbai points.
+
+---
+
+## 12 · B8 — Analytics + Caching
+
+**Goal:** `/analytics/dashboard` (one endpoint, seven shapes), the trial rollup materialized
+view, a cache in front of it, the partitioning decision. **Complete.**
+
+### The read model
+
+`mv_trial_rollup` (V25) is one row per trial — enrolment, site count, AE totals/serious/
+unreviewed, compliance tally, whether a current ethics approval exists. Like B7's GIS
+functions, its source query is `SECURITY DEFINER`: a materialized view carries no RLS of its
+own (policies attach to tables, not views), and the rollup genuinely needs to see every trial's
+adverse events regardless of who eventually reads it. **The scoping happens entirely at read
+time**, in the join every dashboard widget uses — `mv_trial_rollup r JOIN trials t ON t.id =
+r.trial_id` — which inherits `trials`' own RLS for free. Refresh is `REFRESH MATERIALIZED VIEW
+CONCURRENTLY`, which needs ownership `ctms_app` doesn't have, so it goes through
+`app.refresh_trial_rollup()`, the same `SECURITY DEFINER` answer as everywhere else a worker
+needs to touch RLS-protected or owner-restricted objects (V19/V20/V23/V24).
+
+`TrialRollupRefresher` (unconditional `@Component`) does the refresh; `TrialRollupRefreshScheduler`
+(`@ConditionalOnProperty`, disabled in tests) times it every 60 s — the exact
+worker/scheduler split B6c's orphan sweep already established, for the same reason: a test
+refreshing on data it just wrote must not race a timer doing the same thing mid-assertion.
+
+### Caching
+
+`CacheProvider` (interface) / `CaffeineCacheProvider` (impl), one tier. **Redis L2 was not
+built.** The design calls for it "wired but inactive at one instance" — at this project's
+actual scale (one instance, no managed Redis on the free tier either) that is a container, a
+dependency and a config surface bought for a property the deployment does not have. The
+interface is what a second tier would sit behind later without any caller changing.
+Invalidation is TTL-only (90 s, §23.8's 60–120 s window) rather than a write-triggered
+`§13.2` map: precise invalidation across every write path touching seven dashboard shapes is a
+much larger change than the value of shaving 90 seconds of staleness off an at-a-glance card,
+and the TTL is what that window is *for*. Revisit if a dashboard number's staleness ever
+matters more than that trade — a compliance or safety figure someone is about to act on, say.
+
+### Partitioning: deferred again, on purpose
+
+BACKEND_PHASES.md put this decision here, "against measured numbers." No load test has run
+yet (that is B9's job — §14 of the phase plan, k6 against a seeded 50–100M-row dataset), so
+there are no numbers to decide against. Deferring without evidence is the correct call the
+spec itself asks for, not a skipped task — implementing month-range partitioning on
+`observations` now would also cost `uq_observations_visit_code` (§B3's own note) for a benefit
+nobody has measured yet. Revisit in B9 once the load test exists.
+
+### Two real bugs this phase's own tests caught
+
+**Self-invocation silently drops `@Transactional`.** `AnalyticsService.dashboard()` cached its
+result via `cache.get(key, () -> compute(caller))`. Putting `@Transactional` on `compute`
+instead of `dashboard` compiled fine and passed the one test that didn't depend on it — because
+`compute` was called through `this`, never through the Spring proxy that actually implements
+the annotation, so no transaction ever began, `app.current_user_id` was never bound, and every
+RLS-scoped query returned zero rows. Silently: a dashboard with a real trial on it read back
+empty, no error anywhere. Fixed by moving `@Transactional` to `dashboard` itself, which is
+what the controller actually calls through the proxy. **The annotation must sit on the method
+the caller invokes from outside the class — never on a method reached only via `this`.**
+
+**A `NULL` JDBC parameter needs a cast to be compared with `IS NULL` in the same clause.**
+`/audit`'s optional filters were written as `(? IS NULL OR entity_type = ?)`; PostgreSQL's
+driver cannot infer the placeholder's type from a null value with no other context and refused
+the query outright (`BadSqlGrammarException`) rather than silently misbehaving — a kinder
+failure than V22.4.4-style test camouflage, but still a filter that would have gone the same
+way for every optional audit query. Fixed with an explicit `CAST(? AS text)` per parameter,
+matching its column's real type (`uuid`, `timestamptz`).
+
+## 13 · Standing constraints
 
 - Free tier throughout: Supabase Postgres (500 MB, no replicas, no backups, 7-day pause),
   Oracle Always Free VM (4 ARM cores / 24 GB) for the app + Redis + ClamAV, Vercel for the
