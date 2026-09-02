@@ -38,6 +38,32 @@ public final class RlsUserContext {
         }
     }
 
+    /**
+     * Binds {@code userId} until the returned scope is closed.
+     *
+     * <p>For callers that cannot be expressed as a lambda — a servlet filter delegating down a
+     * chain that throws checked exceptions. Use with try-with-resources so the clear is still
+     * structural rather than a {@code finally} someone can forget.
+     */
+    public static Scope open(UUID userId) {
+        UUID previous = CURRENT.get();
+        CURRENT.set(userId);
+        return () -> {
+            if (previous == null) {
+                CURRENT.remove();
+            } else {
+                CURRENT.set(previous);
+            }
+        };
+    }
+
+    /** An active identity binding. Closing restores whatever was bound before. */
+    @FunctionalInterface
+    public interface Scope extends AutoCloseable {
+        @Override
+        void close();
+    }
+
     public static void runAs(UUID userId, Runnable action) {
         callAs(
                 userId,
