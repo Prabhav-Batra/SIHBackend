@@ -4,7 +4,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * Wiring for the documents module.
@@ -16,11 +15,11 @@ import org.springframework.scheduling.annotation.EnableScheduling;
  * A named property says which implementation is running and fails loudly when the name is
  * wrong, which is what a decision this consequential should do.
  *
- * <p>{@link EnableScheduling} lives here because the scan poller is the platform's first and
- * only timer. If a second module ever needs one, this moves to the composition root.
+ * <p>{@code @EnableScheduling} used to live here as the platform's first and only timer; B8
+ * added a second (the rollup refresh), so it moved to {@code CtmsApplication} per this class's
+ * own prior note.
  */
 @Configuration
-@EnableScheduling
 @EnableConfigurationProperties(DocumentProperties.class)
 public class DocumentsConfig {
 

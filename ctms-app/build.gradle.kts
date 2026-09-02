@@ -40,5 +40,13 @@ dependencies {
     // module artifact with "testcontainers-". The 1.x names resolve to no version.
     testImplementation("org.testcontainers:testcontainers-junit-jupiter")
     testImplementation("org.testcontainers:testcontainers-postgresql")
+    // GenericContainer itself, for ClamAvScanIT's real clamd — declared explicitly rather
+    // than relied on as a transitive of the two above, which is an implementation detail of
+    // theirs and not a contract either advertises.
+    testImplementation("org.testcontainers:testcontainers")
+    // ctms-documents depends on this as `implementation`, so it is not on ctms-app's
+    // classpath transitively. ClamAvScanIT uses the client directly to confirm clamd is
+    // actually answering PING before any test sends it a scan.
+    testImplementation("xyz.capybara:clamav-client:2.1.2")
 }
 

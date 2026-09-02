@@ -12,6 +12,9 @@ import java.net.http.HttpResponse;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -149,6 +152,59 @@ public class CloudinaryStorageBackend implements StorageBackend {
         } catch (Exception e) {
             throw new IllegalStateException("Could not sign a download URL for " + publicId, e);
         }
+    }
+
+    /** Cloudinary's own taxonomy (§8.21's {@code ck_documents_resource_type}). */
+    private static final List<String> RESOURCE_TYPES = List.of("image", "raw", "video");
+
+    @Override
+    public List<StoredAsset> list() throws IOException {
+        List<StoredAsset> found = new ArrayList<>();
+        for (String resourceType : RESOURCE_TYPES) {
+            listOneResourceType(resourceType, found);
+        }
+        return found;
+    }
+
+    /**
+     * Cloudinary's Admin API lists one resource type per call and paginates the rest, so the
+     * orphan sweep walks all three types and every page of each.
+     */
+    private void listOneResourceType(String resourceType, List<StoredAsset> found)
+            throws IOException {
+        String cursor = null;
+        do {
+            Map<String, Object> options = new HashMap<>();
+            options.put("resource_type", resourceType);
+            options.put("type", AUTHENTICATED);
+            options.put("prefix", folder + "/");
+            options.put("max_results", 500);
+            if (cursor != null) {
+                options.put("next_cursor", cursor);
+            }
+
+            Map<?, ?> page;
+            try {
+                page = cloudinary.api().resources(options);
+            } catch (Exception e) {
+                throw new IOException(
+                        "Could not list " + resourceType + " assets under " + folder, e);
+            }
+
+            Object resources = page.get("resources");
+            if (resources instanceof List<?> entries) {
+                for (Object entry : entries) {
+                    Map<?, ?> asset = (Map<?, ?>) entry;
+                    found.add(
+                            new StoredAsset(
+                                    String.valueOf(asset.get("public_id")),
+                                    resourceType,
+                                    Instant.parse(String.valueOf(asset.get("created_at")))));
+                }
+            }
+            Object next = page.get("next_cursor");
+            cursor = next == null ? null : String.valueOf(next);
+        } while (cursor != null);
     }
 
     /**

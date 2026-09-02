@@ -12,7 +12,8 @@ public record DocumentProperties(
         @DefaultValue("300s") Duration downloadUrlTtl,
         @DefaultValue Local local,
         @DefaultValue Clamav clamav,
-        @DefaultValue Cloudinary cloudinary) {
+        @DefaultValue Cloudinary cloudinary,
+        @DefaultValue OrphanSweep orphanSweep) {
 
     /** The filesystem backend: local development, and the test path. */
     public record Local(@DefaultValue("${java.io.tmpdir}/ctms-documents") String root) {}
@@ -38,4 +39,13 @@ public record DocumentProperties(
             @DefaultValue("localhost") String host,
             @DefaultValue("3310") int port,
             @DefaultValue("30s") Duration timeout) {}
+
+    /**
+     * The orphan sweep (§16.7).
+     *
+     * @param minAge how long an unreferenced object must sit before it is removed. The delay
+     *     exists so the sweep does not race an upload whose transaction has not committed yet
+     *     — the object exists, its row does not, and nothing is wrong.
+     */
+    public record OrphanSweep(@DefaultValue("24h") Duration minAge) {}
 }

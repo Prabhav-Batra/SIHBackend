@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.net.URI;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.List;
 
 /**
  * Where document bytes live (§16.9, ADR-005).
@@ -48,4 +49,15 @@ public interface StorageBackend {
      * @param fileName what the browser should call the download; it does not affect access
      */
     URI signedDownloadUrl(String publicId, String resourceType, Duration ttl, String fileName);
+
+    /**
+     * Lists every object currently held under this backend's namespace, each with when it was
+     * stored.
+     *
+     * <p>The input to the orphan sweep (§16.7): the upload path writes bytes before its
+     * transaction commits, so a crash between the write and the commit leaves an object
+     * nothing points at, and the only way to find one is to enumerate the store itself rather
+     * than the database.
+     */
+    List<StoredAsset> list() throws IOException;
 }

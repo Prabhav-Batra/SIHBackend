@@ -10,6 +10,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Stream;
 
 /**
  * Filesystem storage.
@@ -53,6 +56,29 @@ public class LocalStorageBackend implements StorageBackend {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    @Override
+    public List<StoredAsset> list() throws IOException {
+        if (!Files.isDirectory(root)) {
+            return List.of();
+        }
+        List<StoredAsset> found = new ArrayList<>();
+        try (Stream<Path> resourceTypeDirs = Files.list(root)) {
+            for (Path typeDir : resourceTypeDirs.filter(Files::isDirectory).toList()) {
+                String resourceType = typeDir.getFileName().toString();
+                try (Stream<Path> objects = Files.list(typeDir)) {
+                    for (Path object : objects.filter(Files::isRegularFile).toList()) {
+                        found.add(
+                                new StoredAsset(
+                                        object.getFileName().toString(),
+                                        resourceType,
+                                        Files.getLastModifiedTime(object).toInstant()));
+                    }
+                }
+            }
+        }
+        return found;
     }
 
     @Override
