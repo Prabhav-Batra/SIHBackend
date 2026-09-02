@@ -51,6 +51,11 @@ public abstract class AbstractPostgresIT {
         registry.add("spring.datasource.username", () -> APP_USER);
         registry.add("spring.datasource.password", () -> APP_PASSWORD);
 
+        // The scan poller is off in tests. Integration tests call DocumentScanWorker.runOnce()
+        // themselves, and a timer draining the same queue would claim jobs mid-assertion — a
+        // race that would read as flakiness rather than as the design decision it is.
+        registry.add("ctms.documents.scan.scheduled", () -> "false");
+
         /* A test-only signing key. Production has no default and fails fast without one. */
         registry.add(
                 "ctms.auth.jwt-secret", () -> "integration-test-signing-key-at-least-32-bytes");

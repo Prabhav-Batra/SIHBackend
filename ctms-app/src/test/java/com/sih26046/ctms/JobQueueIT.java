@@ -38,18 +38,29 @@ class JobQueueIT extends AbstractPostgresIT {
                 "SELECT status FROM jobs WHERE id = ?::uuid", String.class, id.toString());
     }
 
+    /**
+     * A job type nobody else uses.
+     *
+     * <p>These tests share a database with the rest of the suite, so claiming by a type a real
+     * feature also drains means asserting on whichever job happened to be oldest.
+     */
+    private static String aType() {
+        return "TEST_JOB_" + UUID.randomUUID().toString().substring(0, 8);
+    }
+
     @Test
     void anEnqueuedJobIsPending() {
-        UUID id = jobs.enqueue("DOCUMENT_SCAN", "{\"documentId\":\"x\"}");
+        UUID id = jobs.enqueue(aType(), "{\"documentId\":\"x\"}");
 
         assertThat(statusOf(id)).isEqualTo("PENDING");
     }
 
     @Test
     void claimingReturnsTheJobAndMarksItRunning() {
-        UUID id = jobs.enqueue("DOCUMENT_SCAN", "{}");
+        String type = aType();
+        UUID id = jobs.enqueue(type, "{}");
 
-        Optional<QueuedJob> claimed = jobs.claimNext("DOCUMENT_SCAN");
+        Optional<QueuedJob> claimed = jobs.claimNext(type);
 
         assertThat(claimed).isPresent();
         assertThat(claimed.get().id()).isEqualTo(id);
@@ -86,8 +97,9 @@ class JobQueueIT extends AbstractPostgresIT {
 
     @Test
     void aFailedJobIsRetriedWithBackoff() {
-        UUID id = jobs.enqueue("DOCUMENT_SCAN", "{}");
-        jobs.claimNext("DOCUMENT_SCAN");
+        String type = aType();
+        UUID id = jobs.enqueue(type, "{}");
+        jobs.claimNext(type);
 
         jobs.fail(id, "scanner unreachable");
 
@@ -99,7 +111,7 @@ class JobQueueIT extends AbstractPostgresIT {
                         id.toString());
         assertThat(attempts).isEqualTo(1);
         // Backoff: it must not be immediately re-claimable, or a failing job spins.
-        assertThat(jobs.claimNext("DOCUMENT_SCAN")).isEmpty();
+        assertThat(jobs.claimNext(type)).isEmpty();
     }
 
     @Test
@@ -121,8 +133,9 @@ class JobQueueIT extends AbstractPostgresIT {
 
     @Test
     void completingAJobRemovesItFromTheQueue() {
-        UUID id = jobs.enqueue("DOCUMENT_SCAN", "{}");
-        jobs.claimNext("DOCUMENT_SCAN");
+        String type = aType();
+        UUID id = jobs.enqueue(type, "{}");
+        jobs.claimNext(type);
 
         jobs.complete(id);
 
