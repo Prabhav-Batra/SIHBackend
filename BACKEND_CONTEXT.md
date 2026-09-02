@@ -5,9 +5,10 @@
 > load-bearing, and — most valuably — the traps that already cost time. Update it at every
 > phase commit.
 
-**Last updated:** 2026-09-02, after `278614a` (B6c, first half).
-**State:** B1–B6b complete; B6c upload + scan done. 190 tests, 0 failures.
-**Next:** B6c remainder — version chain, signed download, Cloudinary backend, orphan sweep.
+**Last updated:** 2026-09-02, after the Cloudinary backend.
+**State:** B1–B6b complete; B6c upload, scan, version chain, signed download and the Cloudinary
+backend all done and verified against the live service. 203 tests + 2 external, 0 failures.
+**Next:** B6c remainder — orphan sweep, real-ClamAV EICAR test. Then B7 GIS.
 
 ---
 
@@ -50,6 +51,8 @@ domain spec wins on *what*.
 ```bash
 cd backend
 ./gradlew test                          # full suite; needs Docker running
+./gradlew externalTest                  # verifies adapters against REAL Cloudinary; writes
+                                        # to the live account, needs backend/.env
 ./gradlew :ctms-app:test --tests 'com.sih26046.ctms.EthicsApiIT'
 ./gradlew test --rerun-tasks            # bypass the build cache when in doubt
 ./gradlew :ctms-app:bootRun             # needs a live Postgres + the env below
@@ -60,6 +63,10 @@ cd backend
 - Toolchain: **Java 26**, Gradle **9.7.1**, configuration cache and build cache both **on**.
 - Secrets live in `backend/.env`, which is gitignored. `CTMS_JWT_SECRET` has no default — the
   application refuses to start without it, on purpose.
+- Tests tagged `external` hit real third-party services and are **excluded from `test`**. The
+  exclusion is on the `test` task only — putting it in `configureEach` applies it to
+  `externalTest` too, and a task that both includes and excludes a tag runs **zero tests while
+  reporting BUILD SUCCESSFUL**.
 
 ---
 
@@ -304,14 +311,18 @@ exception path" is server-side. "Signed upload" means the server signs its own A
 
 **Remaining:**
 
-1. Version chain on supersede (§17.2); `document_family_id` groups versions, v1 sets it to its
-   own id. `superseded_by_id` closes the old one.
-2. Signed download: per-request, never stored or cached, 300 s expiry, 302 redirect, audited.
-   Needs `signedDownloadUrl` added to `StorageBackend`.
-3. `CloudinaryStorageBackend`, selected by `ctms.documents.storage-backend=cloudinary`.
-4. Orphan sweep job (§16.7), 24-hour delay to avoid racing an in-flight upload.
-5. `ClamAvScanIT` — one test against a real `clamav/clamav` container asserting an EICAR upload
+1. ~~Version chain on supersede~~ · ~~signed download~~ · ~~`CloudinaryStorageBackend`~~ — done.
+2. Orphan sweep job (§16.7), 24-hour delay to avoid racing an in-flight upload.
+3. `ClamAvScanIT` — one test against a real `clamav/clamav` container asserting an EICAR upload
    never leaves `QUARANTINED`. The fake in `DocumentUploadIT` proves the state machine only.
+
+**Cloudinary, as built.** Assets upload as `type: authenticated`, because a default upload is
+publicly reachable by URL forever with nothing to revoke. That forces the download design:
+Cloudinary's plain `signed: true` URLs are tamper-proof but **never expire**, and its expiring
+`auth_token` scheme needs a paid add-on. The **private download API** is what carries
+`expires_at` inside the signature on the free tier, so that is what `signedDownloadUrl` uses.
+`CloudinaryStorageIT` proves both halves against the live service: a valid link serves the
+bytes, a tampered one and an expired one do not.
 
 **Cloudinary credentials** are needed only at step 6–7, to verify the real adapter once. Slots
 already exist in `backend/.env` (`CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`,

@@ -18,4 +18,10 @@ dependencies {
     // chunked-framing and reply-parsing details are exactly the sort of thing that works in
     // testing and truncates on a 40 MB file in production.
     implementation("xyz.capybara:clamav-client:2.1.2")
+
+
+    // Cloudinary's own SDK rather than hand-built signed URLs. Its signature scheme is
+    // undocumented in the details that matter and changes across API versions; getting it
+    // subtly wrong yields URLs that work today and 401 after an upgrade.
+    implementation("com.cloudinary:cloudinary-http5:2.4.0")
 }
