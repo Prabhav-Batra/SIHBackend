@@ -38,21 +38,27 @@ public class AccessTokenAuthFilter extends OncePerRequestFilter {
             HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
 
-        readCookie(request)
-                .flatMap(this::authenticate)
-                .ifPresent(
-                        current -> {
-                            List<SimpleGrantedAuthority> authorities =
-                                    current.permissions().stream()
-                                            .map(SimpleGrantedAuthority::new)
-                                            .toList();
-                            var authentication =
-                                    new UsernamePasswordAuthenticationToken(
-                                            current, null, authorities);
-                            SecurityContextHolder.getContext().setAuthentication(authentication);
-                        });
+        Optional<CurrentUser> current = readCookie(request).flatMap(this::authenticate);
 
-        chain.doFilter(request, response);
+        if (current.isEmpty()) {
+            chain.doFilter(request, response);
+            return;
+        }
+
+        List<SimpleGrantedAuthority> authorities =
+                current.get().permissions().stream().map(SimpleGrantedAuthority::new).toList();
+        SecurityContextHolder.getContext()
+                .setAuthentication(
+                        new UsernamePasswordAuthenticationToken(current.get(), null, authorities));
+
+        // Bind the identity that every RLS policy reads (§7.3). Without this the request runs
+        // with app.current_user_id unset: policies see no user, reads return nothing and writes
+        // are refused. It fails closed, which is the right failure — but it fails silently and
+        // completely, so it belongs here in the filter rather than anywhere a handler could
+        // omit it.
+        try (RlsUserContext.Scope scope = RlsUserContext.open(current.get().userId())) {
+            chain.doFilter(request, response);
+        }
     }
 
     private Optional<CurrentUser> authenticate(String token) {
