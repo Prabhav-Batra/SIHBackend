@@ -1,0 +1,21 @@
+-- V21 — closes an accidental RLS bypass in a view built during B4, found while building B7
+-- (GIS), which was about to become its most natural consumer.
+--
+-- trial_sites_located (V4) is an ordinary view over trial_sites and institutions, both under
+-- FORCE ROW LEVEL SECURITY. Before a view opts into security_invoker, PostgreSQL checks its
+-- access to the underlying tables — both grants and row security — as the VIEW'S OWNER, not
+-- the querying role. The owner here is whichever role ran the migrations: on Supabase, a role
+-- without BYPASSRLS or superuser, so FORCE would still apply to it correctly; but in this
+-- project's own Testcontainers harness, the bootstrap role that runs Flyway is a literal
+-- superuser, and superusers bypass row security unconditionally — FORCE only ever closes the
+-- "owner without superuser" loophole (§7.7). Querying this view as ctms_app would therefore
+-- silently return every row, in every environment where the owner happens to be a superuser,
+-- regardless of the caller's actual scope. Nothing has been broken by it yet — the one
+-- existing reference is a schema test run on the unscoped owner connection, not a scoped
+-- read — but it is exactly the "passed for the wrong reason" failure mode §5.2 already
+-- catalogues twice over, waiting for the first real caller.
+--
+-- security_invoker makes the view re-check both grants and row security as the actual calling
+-- role, which is the behaviour every other read in this codebase already has, and is available
+-- because this project already runs Postgres 17.
+ALTER VIEW trial_sites_located SET (security_invoker = true);
