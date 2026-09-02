@@ -5,8 +5,9 @@
 > load-bearing, and — most valuably — the traps that already cost time. Update it at every
 > phase commit.
 
-**Last updated:** 2026-09-02, after `fabcc16` (B6b).
-**State:** B1–B6b complete. 176 tests, 0 failures. Next: **B6c — Documents**.
+**Last updated:** 2026-09-02, after `278614a` (B6c, first half).
+**State:** B1–B6b complete; B6c upload + scan done. 190 tests, 0 failures.
+**Next:** B6c remainder — version chain, signed download, Cloudinary backend, orphan sweep.
 
 ---
 
@@ -36,7 +37,8 @@ domain spec wins on *what*.
 | B5 | Participant enrolment, visits, observations, medications, consent | done · `b26831f` |
 | B6a | Adverse events, safety review, event-triggered clinical read | done · `e0874c4` |
 | B6b | Ethics submission/review/decision, compliance catalogue + rollup | done · `fabcc16` |
-| **B6c** | **Documents — upload, scan, quarantine, version chain, signed download** | **next** |
+| B6c | Documents — upload, Tika sniffing, checksum, ClamAV via the queue, quarantine | done · `278614a` |
+| **B6c** | **remainder — version chain, signed download, Cloudinary, orphan sweep** | **next** |
 | B7 | GIS | not started |
 | B8 | Analytics, caching, partitioning decision | not started |
 | B9 | Hardening, CSRF, deploy | not started |
@@ -108,7 +110,17 @@ implementation; `EthicsController` and `ComplianceController` follow it.
 ### 4.5 The job queue is Postgres, not Kafka
 
 `jobs` table, claimed with `SELECT … FOR UPDATE SKIP LOCKED`. No RLS on it, deliberately — it is
-infrastructure, not domain data. This is where B6c's ClamAV scan is dispatched.
+infrastructure, not domain data. `DocumentScanWorker` is the first consumer.
+
+**A worker sees no RLS-protected rows.** It runs on nobody's behalf, so `app.current_user_id` is
+unset and every policy evaluates false — its `UPDATE` matches nothing, and an `UPDATE` that
+matches nothing is not an error. The answer is a **narrow `SECURITY DEFINER` function per
+operation** (V19), never a `BYPASSRLS` role and never running as the uploading user, whose
+deactivation would strand their files forever. Constrain the function in SQL so calling it
+grants only the one thing it exists for.
+
+**Give every test its own job type.** The suite shares one database; claiming by a type a real
+feature also drains means asserting on whichever job happened to be oldest.
 
 ---
 
@@ -143,6 +155,15 @@ These are the ones to be afraid of.
   that discriminates.
 - **The scope harness counted whole tables** and broke when an unrelated test class inserted a
   row. It now restricts to its own fixture ids so the counts stay exact.
+
+- **`jdbc.update()` on a `SELECT` over a void-returning function throws *after* the function has
+  run and committed.** The document reached DRAFT while its job failed and requeued forever. Use
+  `jdbc.query(sql, rs -> null, args)`. More generally: when a worker writes, assert the *queue's*
+  view of the outcome, not only the row's — a status written just before an exception looks
+  exactly like success.
+- **A test that only asserts "it failed" cannot tell which failure it saw.** The transient-scanner
+  test read `attempts == 1` caused by a broken worker, not by its own scripted failure. Assert the
+  recorded error text.
 
 **Practice that follows: prove the guard fires.** Mutate the thing the test guards and confirm
 the test goes red. Doing this changed the answer three separate times.
@@ -202,6 +223,13 @@ An inline `EXISTS` against a protected table makes the predicate depend on what 
 
 ### 5.7 Miscellaneous
 
+- **`@ConditionalOnMissingBean` on a component-scanned `@Component` is unreliable** and here
+  registered *no* storage backend at all. It is only dependable on auto-configuration `@Bean`
+  methods. Select implementations with an explicit named property instead
+  (`ctms.documents.storage-backend`), which fails loudly rather than silently.
+- **Spring's default multipart limit is 1 MB**, far under the schema's 50 MB, so a legitimate
+  upload failed as a 500 before any validator ran. Set `spring.servlet.multipart.*`, including
+  `file-size-threshold` so large uploads spill to disk instead of heap.
 - Nested repository **interfaces** are not scanned by Spring Data (nested *projection*
   interfaces are fine — `TrialComplianceRepository.StatusTally` works).
 - `@BeforeAll` runs before the Spring context refreshes.
@@ -245,6 +273,7 @@ An inline `EXISTS` against a protected table makes the predicate depend on what 
 | V16 | `participant_identity:create` grant |
 | V17 | ethics per-command policies; PI withdraw pinned to destination status |
 | V18 | `compliance:read` for ETHICS_MEMBER and SAFETY_OFFICER |
+| V19 | `app.document_storage_handle` and `app.record_scan_result` — how the scan worker touches RLS-protected rows |
 
 ---
 
@@ -264,29 +293,25 @@ An inline `EXISTS` against a protected table makes the predicate depend on what 
 **Goal:** `/documents`. Upload validation, async malware scan, quarantine until clean,
 immutable version chain, short-lived signed download.
 
-**Order of work** (storage-agnostic core first, real Cloudinary last):
+**Done** (`278614a`): `StorageBackend` + `LocalStorageBackend`; upload through the backend
+spooled to a temp file; the §16.5 validation layers; server-side SHA-256; ClamAV wired to the
+job queue via `DocumentScanWorker`; the `PENDING_SCAN` → `CLEAN`/`INFECTED` state machine with
+the infected asset deleted, not merely flagged.
 
-1. `StorageBackend` interface + a local filesystem implementation for tests.
-2. Upload **through the backend**, not browser-direct. §16.7 settles this — "the upload writes
-   to Cloudinary *before* the transaction commits… the upload handler deletes the asset in its
-   exception path" is server-side. "Signed upload" means the server signs its own API call.
-   Stream multipart to a temp file; never buffer 50 MB in heap.
-3. Validation layers (§16.5), in order: size ≤ 50 MB · extension allowlist
-   (`.pdf .docx .xlsx .png .jpg .csv`) · **magic-byte sniff that must agree with both the
-   extension and the declared Content-Type** · filename sanitisation · SHA-256.
-4. ClamAV scan dispatched to the B3 job queue. `PENDING_SCAN` → `CLEAN`/`INFECTED`/`ERROR`.
-   `ck_documents_available_requires_clean` already makes an unscanned file undownloadable at the
-   database level.
-5. Version chain on supersede (§17.2); `document_family_id` groups versions, v1 sets it to its
-   own id.
-6. Signed download: per-request, never stored or cached, 300 s expiry, 302 redirect, audited.
-7. Orphan sweep job (§16.7), 24-hour delay to avoid racing an in-flight upload.
+Upload goes **through the backend**, not browser-direct — §16.7 settles it: "the upload writes
+to Cloudinary *before* the transaction commits… the upload handler deletes the asset in its
+exception path" is server-side. "Signed upload" means the server signs its own API call.
 
-**Testing plan:** a fake scanner for the fast tests, plus **one** integration test against a
-real `clamav/clamav` container that uploads the EICAR string and asserts it never reaches
-`CURRENT`. That image is a ~1 GB one-time pull and clamd takes ~40 s to load signatures, so that
-test is slow by design. A fake-only suite would prove the state machine but not detection, and
-"an infected upload never reaches AVAILABLE" is B6's stated done-condition.
+**Remaining:**
+
+1. Version chain on supersede (§17.2); `document_family_id` groups versions, v1 sets it to its
+   own id. `superseded_by_id` closes the old one.
+2. Signed download: per-request, never stored or cached, 300 s expiry, 302 redirect, audited.
+   Needs `signedDownloadUrl` added to `StorageBackend`.
+3. `CloudinaryStorageBackend`, selected by `ctms.documents.storage-backend=cloudinary`.
+4. Orphan sweep job (§16.7), 24-hour delay to avoid racing an in-flight upload.
+5. `ClamAvScanIT` — one test against a real `clamav/clamav` container asserting an EICAR upload
+   never leaves `QUARANTINED`. The fake in `DocumentUploadIT` proves the state machine only.
 
 **Cloudinary credentials** are needed only at step 6–7, to verify the real adapter once. Slots
 already exist in `backend/.env` (`CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`,
