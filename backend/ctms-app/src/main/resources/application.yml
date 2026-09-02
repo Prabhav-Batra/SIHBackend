@@ -20,6 +20,18 @@ spring:
       maximum-pool-size: ${CTMS_DB_POOL_MAX:10}
       pool-name: ctms-pool
 
+  servlet:
+    multipart:
+      # §16.5 caps a document at 50 MB, and ck_documents_size enforces it. Spring's own
+      # default is 1 MB, so without this a legitimate protocol fails as a 500 long before
+      # the validator gets to explain why.
+      max-file-size: 50MB
+      max-request-size: 55MB
+      # Spill to disk past this rather than holding the upload in heap. On a 24 GB VM a
+      # handful of concurrent 50 MB uploads in memory is the difference between working
+      # and an OutOfMemoryError.
+      file-size-threshold: 256KB
+
   jpa:
     open-in-view: false          # an open session in the view layer hides N+1 and leaks tx scope
     hibernate:

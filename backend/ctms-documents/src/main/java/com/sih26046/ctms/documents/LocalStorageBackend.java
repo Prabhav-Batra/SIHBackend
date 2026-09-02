@@ -1,0 +1,63 @@
+package com.sih26046.ctms.documents;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+
+/**
+ * Filesystem storage.
+ *
+ * <p>Present so that every layer above it — validation, the quarantine state machine, the
+ * version chain — is testable without a Cloudinary account, and so local development works
+ * offline. Which backend is active is chosen by {@code ctms.documents.storage-backend} in
+ * {@link DocumentsConfig}.
+ */
+public class LocalStorageBackend implements StorageBackend {
+
+    private final Path root;
+
+    public LocalStorageBackend(DocumentProperties properties) {
+        this.root = Path.of(properties.local().root());
+    }
+
+    @Override
+    public StoredObject put(String objectKey, String resourceType, String contentType, Path source)
+            throws IOException {
+        Path target = resolve(objectKey, resourceType);
+        Files.createDirectories(target.getParent());
+        Files.copy(source, target, StandardCopyOption.REPLACE_EXISTING);
+        return new StoredObject(objectKey, resourceType, null);
+    }
+
+    @Override
+    public InputStream open(String publicId, String resourceType) throws IOException {
+        return Files.newInputStream(resolve(publicId, resourceType));
+    }
+
+    @Override
+    public boolean exists(String publicId, String resourceType) {
+        return Files.exists(resolve(publicId, resourceType));
+    }
+
+    @Override
+    public void delete(String publicId, String resourceType) {
+        try {
+            Files.deleteIfExists(resolve(publicId, resourceType));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private Path resolve(String publicId, String resourceType) {
+        // normalize() then a containment check: publicId is server-generated today, but a
+        // path-building helper that trusts its input is one refactor away from not being safe.
+        Path candidate = root.resolve(resourceType).resolve(publicId).normalize();
+        if (!candidate.startsWith(root)) {
+            throw new IllegalArgumentException("Object key escapes the storage root");
+        }
+        return candidate;
+    }
+}
