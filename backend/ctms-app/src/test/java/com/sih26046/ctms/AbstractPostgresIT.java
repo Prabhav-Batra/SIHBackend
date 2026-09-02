@@ -56,6 +56,15 @@ public abstract class AbstractPostgresIT {
         // race that would read as flakiness rather than as the design decision it is.
         registry.add("ctms.documents.scan.scheduled", () -> "false");
 
+        // Same reasoning for the orphan sweep: tests call DocumentOrphanSweepWorker.sweep()
+        // themselves, on files they have deliberately backdated, and a nightly timer walking
+        // the same shared storage root mid-test would be a second, uncontrolled sweeper.
+        registry.add("ctms.documents.orphan-sweep.scheduled", () -> "false");
+
+        // Same reasoning again: tests refresh mv_trial_rollup themselves, on data they just
+        // wrote, and a timer refreshing mid-assertion would be a second, uncontrolled refresh.
+        registry.add("ctms.analytics.rollup-refresh-scheduled", () -> "false");
+
         /* A test-only signing key. Production has no default and fails fast without one. */
         registry.add(
                 "ctms.auth.jwt-secret", () -> "integration-test-signing-key-at-least-32-bytes");
