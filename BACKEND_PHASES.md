@@ -142,7 +142,7 @@ endpoint is an index or a materialized view, never a cache entry.
 | Isolation | `participant_identities` reachable only via `participant_identity:*`, never joined into clinical responses (ADR-011); every read audited (§19.3) |
 | Endpoints | `/participants` `/consents` `/visits` `/observations` `/medications` |
 | Rules | No consent, no clinical write; withdrawal stops new data without deleting old (§20.3) |
-| Idempotency | `Idempotency-Key` on enrolment, keys in Redis (§14.5) |
+| Idempotency | `Idempotency-Key` on enrolment (§14.5). In-process for a single instance; `uq_participants_trial_subject_code` holds the safety property. Becomes a Postgres table written inside the enrolment transaction before a second replica exists — not Redis, since it is authoritative (ADR-002) |
 
 **Done when** — a replayed enrolment request creates exactly one participant, and no clinical response body contains an identifying field.
 
