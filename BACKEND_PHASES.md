@@ -90,7 +90,6 @@ endpoint is an index or a materialized view, never a cache entry.
 | Item | Detail |
 |---|---|
 | Tables | The remaining 18 from §8 with every CHECK, FK and unique constraint (§14.2) |
-| Partitioning | `observations` and `audit_logs` range-partitioned by month; index `(participant_id, recorded_at)` (spec §7) |
 | Indexes | The §28.2 set, plus GiST on every `geography` column |
 | RLS | `ENABLE` + `FORCE ROW LEVEL SECURITY`, policies per table class (§7.5), helpers `SECURITY DEFINER` to avoid the §7.4 recursion trap |
 | **Identity propagation** | One `TransactionSynchronization` in `ctms-security` issuing `SELECT set_config('app.current_user_id', :uid, true)` — parameterised (§7.3), transaction-scoped, pooler-safe (spec §6.2) |
@@ -98,10 +97,20 @@ endpoint is an index or a materialized view, never a cache entry.
 | Pooling | Supavisor transaction mode; `prepareThreshold=0`, Hibernate statement cache off |
 | Audit | `audit_logs` immutability trigger + revoked UPDATE/DELETE grants (§7.8, §19.4) |
 | Job queue | `jobs` table, `SELECT … FOR UPDATE SKIP LOCKED` poller on a virtual-thread executor, retry with backoff and a dead-letter state (spec §10) |
+| Not partitioned | Deferred to B8 — see the note below |
 
 **Done when** — the scope harness (B3 deliverable, see below) is green; `UPDATE audit_logs` fails at the database; and the 200-connection interleaved-borrow test shows no residual GUC.
 
 > **Build the scope harness here.** A parameterised test replaying every repository query as each of the seven roles against an expected visibility matrix. From B4 onward, a new RLS-scoped table that doesn't register with it fails the build.
+
+> **Partitioning is deferred to B8, deliberately.** §8.24 states `audit_logs` is *not*
+> partitioned in the MVP and names month-range partitioning as the growth path; the design
+> spec contradicted the parent document on that point, in error. Partitioning `observations`
+> by `recorded_at` also costs a real guarantee: the partition column must join the primary
+> key, so `uq_observations_visit_code` can no longer enforce one value per code per visit.
+> Trading a data-integrity constraint for query pruning is only worth it against measured
+> slowness, which is what B8 exists to establish (§28.1). On free-tier Supabase's 500 MB the
+> row counts that motivate partitioning are unreachable anyway.
 
 ---
 
@@ -181,6 +190,7 @@ Independent of one another; one per team member.
 | Module | `ctms-analytics` |
 | Endpoints | `/analytics/dashboard` — one endpoint, seven role-shaped payloads (§21.4, §23); `/audit` read-only |
 | **Read model** | Dashboard rollups and GIS aggregates become **materialized views**, refreshed `CONCURRENTLY` by the job queue. Dashboards never touch base tables (spec §7) |
+| **Partitioning** | Deferred here from B3. Decide against measured numbers: month-range on `observations` costs `uq_observations_visit_code`, so it needs evidence, not anticipation |
 | Profile first | Measure before caching: index → materialized view → *then* cache. Never cache to hide a bad plan (§28.1) |
 | Cache | **Caffeine L1** behind a `CacheProvider` interface; Redis L2 wired but inactive at one instance (spec §9.1) |
 | Invalidation | The §13.2 write→key map, applied identically to both tiers, wired in services not controllers |

@@ -232,7 +232,7 @@ matter; app-tier scale-out does not.
 
 | Mechanism | Design |
 |---|---|
-| **Partitioning** | `observations` and `audit_logs` range-partitioned by month. Index `(participant_id, recorded_at)` serves per-participant lookups; time-bounded trial aggregates prune partitions. Without this a dashboard query scans the whole table |
+| **Partitioning** | **Deferred to B8.** Two corrections to this document: §8.24 of the parent architecture states `audit_logs` is *not* partitioned in the MVP, and the index named here — `(participant_id, recorded_at)` — cannot exist, because `observations` links to `visits`, not to participants. Month-range partitioning also forces the partition column into the primary key, which costs `uq_observations_visit_code` its guarantee of one value per code per visit. A data-integrity constraint is not worth trading for pruning until profiling shows the pruning is needed (§28.1) |
 | **Materialized views** | Dashboard rollups (§23) and GIS aggregates (§10.3) are the read model, not an optimisation. Refreshed `CONCURRENTLY` by the job runner. Dashboards never touch base tables |
 | **Indexes** | The §28.2 set, plus GiST on every `geography` column |
 | **Replicas** | Not available on free Supabase. `AbstractRoutingDataSource` seam is built and wired to a single datasource, so enabling replicas later is configuration |
