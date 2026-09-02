@@ -5,10 +5,10 @@
 > load-bearing, and — most valuably — the traps that already cost time. Update it at every
 > phase commit.
 
-**Last updated:** 2026-09-02, after the Cloudinary backend.
-**State:** B1–B6b complete; B6c upload, scan, version chain, signed download and the Cloudinary
-backend all done and verified against the live service. 203 tests + 2 external, 0 failures.
-**Next:** B6c remainder — orphan sweep, real-ClamAV EICAR test. Then B7 GIS.
+**Last updated:** 2026-09-02, after `96ef7ba`.
+**State:** B1–B6b complete. B6c is done except the orphan sweep and the real-ClamAV test.
+**Tests:** 203 in the default suite + 2 `external`, all green.
+**Next:** orphan sweep (§16.7) · `ClamAvScanIT` against a live clamd · then B7 GIS.
 
 ---
 
@@ -38,8 +38,10 @@ domain spec wins on *what*.
 | B5 | Participant enrolment, visits, observations, medications, consent | done · `b26831f` |
 | B6a | Adverse events, safety review, event-triggered clinical read | done · `e0874c4` |
 | B6b | Ethics submission/review/decision, compliance catalogue + rollup | done · `fabcc16` |
-| B6c | Documents — upload, Tika sniffing, checksum, ClamAV via the queue, quarantine | done · `278614a` |
-| **B6c** | **remainder — version chain, signed download, Cloudinary, orphan sweep** | **next** |
+| B6c | Documents — upload, Tika sniffing, checksum, scan queue, quarantine | done · `278614a` |
+| B6c | Version chain, signed download, first audit writes | done · `853fc59` |
+| B6c | Cloudinary backend, verified live | done · `96ef7ba` |
+| **B6c** | **remainder — orphan sweep, real-ClamAV EICAR test** | **next** |
 | B7 | GIS | not started |
 | B8 | Analytics, caching, partitioning decision | not started |
 | B9 | Hardening, CSRF, deploy | not started |
@@ -70,7 +72,7 @@ cd backend
 
 ---
 
-## 4 · The five mechanisms everything rests on
+## 4 · The mechanisms everything rests on
 
 Understand these before changing anything.
 
@@ -129,6 +131,33 @@ grants only the one thing it exists for.
 **Give every test its own job type.** The suite shares one database; claiming by a type a real
 feature also drains means asserting on whichever job happened to be oldest.
 
+### 4.6 Storage is behind an interface, and delivery is signed
+
+`StorageBackend` (ADR-005) has two implementations, chosen by
+`ctms.documents.storage-backend`: `local` (filesystem, the default and the test path) and
+`cloudinary`. Nothing above the interface knows which is running, and `documents` stores a
+generic handle rather than anything Cloudinary-shaped.
+
+Download is **two steps**, because authorisation and delivery are different concerns.
+`GET /documents/{id}/download` checks the permission, the row-level scope and the scan status,
+writes the audit record, and 302s to a signed URL. The URL is minted per request and **never
+stored or cached** (§12.2) — a cached one outlives the check that produced it. Five minutes, so
+a URL leaked into a log or a screenshot is dead on arrival.
+
+The endpoint the URL points at is deliberately **unauthenticated**: the signature *is* the
+credential. The expiry is inside the signed payload, so a leaked link cannot be given a longer
+life by editing the query string, and verification is constant-time.
+
+### 4.7 The audit trail
+
+`AuditTrail.record(...)` is the only writer, plain JDBC because `audit_logs` is append-only by
+construction — V12 revokes UPDATE from the application role and a trigger stops everyone else.
+
+**`REQUIRES_NEW`, the deliberate opposite of the job queue's `REQUIRED`.** A job must roll back
+with the work that scheduled it; an audit record must not. "This caller was authorised to
+download this file" stays true even if the response later fails, and the security-relevant
+events are exactly the ones whose transactions do not always commit.
+
 ---
 
 ## 5 · Traps that already bit us
@@ -162,7 +191,11 @@ These are the ones to be afraid of.
   that discriminates.
 - **The scope harness counted whole tables** and broke when an unrelated test class inserted a
   row. It now restricts to its own fixture ids so the counts stay exact.
-
+- **A test task that runs zero tests reports `BUILD SUCCESSFUL`.** `excludeTags("external")` in
+  `tasks.withType<Test>().configureEach` also reached `externalTest`, which includes that same
+  tag — so it matched nothing and passed. Only the implausible three-second runtime gave it
+  away. Put the exclusion on the `test` task alone, and distrust a suite that finishes far
+  faster than the work it claims to have done.
 - **`jdbc.update()` on a `SELECT` over a void-returning function throws *after* the function has
   run and committed.** The document reached DRAFT while its job failed and requeued forever. Use
   `jdbc.query(sql, rs -> null, args)`. More generally: when a worker writes, assert the *queue's*
@@ -227,6 +260,11 @@ An inline `EXISTS` against a protected table makes the predicate depend on what 
   Hibernate keeps the value it sent instead of re-reading what the trigger decided. Applies to
   `updated_at`, `created_at`, and to derived columns like `adverse_events.trial_id`.
 - **`end_date >= CURRENT_DATE` left access alive until midnight.** V15 made it exclusive.
+- **A partial unique index cannot be deferred to commit** — only a *constraint* can.
+  `uq_documents_one_current_per_family` rejected `publish()` because promoting the new version
+  before retiring the old one left two `CURRENT` rows for the length of one statement. Demote,
+  flush, then promote. More broadly: when a uniqueness rule spans rows you are swapping between,
+  statement order is part of the design, not an implementation detail.
 
 ### 5.7 Miscellaneous
 
@@ -260,7 +298,25 @@ An inline `EXISTS` against a protected table makes the predicate depend on what 
 
 ---
 
-## 7 · Migrations
+## 7 · Third-party libraries, and why each one
+
+Standing instruction: prefer real libraries to hand-rolled code. What that bought, and the
+reason each is the right call rather than a default:
+
+| Library | Version | Why not by hand |
+|---|---|---|
+| `org.apache.tika:tika-core` | 3.3.2 | Magic-byte detection. **Core only** — the parser modules extract document *content*, which is unwanted here and drags in a large, historically CVE-prone tree. |
+| `xyz.capybara:clamav-client` | 2.1.2 | clamd's INSTREAM framing. Chunked framing and reply parsing are exactly what works in testing and truncates on a 40 MB file. |
+| `com.cloudinary:cloudinary-http5` | 2.4.0 | Its signature scheme is underdocumented in the details that matter and shifts across API versions; a subtly wrong one works today and 401s after an upgrade. |
+| BouncyCastle (Argon2id), Nimbus (JWT) | via Boot BOM | Never hand-roll a KDF or a JWS. |
+
+Deliberately **not** added: a JSON library in `DocumentScanWorker` — Postgres extracts
+`payload->>'documentId'`, so the worker needs no opinion about which Jackson package this Boot
+version ships.
+
+---
+
+## 8 · Migrations
 
 | # | Contents |
 |---|---|
@@ -284,7 +340,7 @@ An inline `EXISTS` against a protected table makes the predicate depend on what 
 
 ---
 
-## 8 · Deferred, with the trigger that should undefer it
+## 9 · Deferred, with the trigger that should undefer it
 
 | Deferred | Undefer when |
 |---|---|
@@ -292,47 +348,64 @@ An inline `EXISTS` against a protected table makes the predicate depend on what 
 | Table partitioning | B8, after profiling. Moved out of B3 deliberately. |
 | CSRF | B9. Currently disabled at `SecurityConfig.java:36`, with a pointer to §18.12. |
 | RLS on `trial_compliance` is looser than RBAC | Intentional. §5.8 gives PI/COORD `compliance:read` only; the API is the narrower layer. Narrower is the safe direction. |
+| `CloudinaryStorageBackend.exists()` treats any failure as "absent" | Acceptable only because its callers re-check. If the orphan sweep ever deletes on the strength of this alone, a network fault becomes data loss — make it distinguish NotFound from everything else first. |
+| `DocumentScanScheduler` polls every 5 s on one instance | Fine now. A second instance is safe (`SKIP LOCKED` handles it) but doubles the poll rate; move to a longer interval or `LISTEN/NOTIFY` if that matters. |
 
 ---
 
-## 9 · B6c — the next phase, as planned
+## 10 · B6c — what is built, and what is left
 
 **Goal:** `/documents`. Upload validation, async malware scan, quarantine until clean,
 immutable version chain, short-lived signed download.
 
-**Done** (`278614a`): `StorageBackend` + `LocalStorageBackend`; upload through the backend
-spooled to a temp file; the §16.5 validation layers; server-side SHA-256; ClamAV wired to the
-job queue via `DocumentScanWorker`; the `PENDING_SCAN` → `CLEAN`/`INFECTED` state machine with
-the infected asset deleted, not merely flagged.
+### Built
 
-Upload goes **through the backend**, not browser-direct — §16.7 settles it: "the upload writes
-to Cloudinary *before* the transaction commits… the upload handler deletes the asset in its
-exception path" is server-side. "Signed upload" means the server signs its own API call.
+| Piece | Notes |
+|---|---|
+| `StorageBackend` + `LocalStorageBackend` + `CloudinaryStorageBackend` | Selected by `ctms.documents.storage-backend`. |
+| Upload through the backend | §16.7 settles it — "the upload writes to Cloudinary *before* the transaction commits… the handler deletes the asset in its exception path" is server-side. "Signed upload" means the server signs its own API call. Spooled to a temp file, never buffered in heap. |
+| Validation (§16.5) | Size · extension allowlist · **content sniff** · filename sanitisation · SHA-256. |
+| Scan pipeline | `DocumentScanWorker` drains `DOCUMENT_SCAN`; `PENDING_SCAN` → `CLEAN`/`INFECTED`. An infected asset's bytes are **deleted**, not merely flagged. |
+| Version chain (§17.2) | `document_family_id` groups versions; v1 sets it to its own id. |
+| Signed download (§16.4) | 302, 300 s, audited, never cached. |
 
-**Remaining:**
+**Content sniffing runs on content only.** Tika is never given the filename as a hint — a
+detector told what to expect agrees with an attacker's chosen extension and the check becomes a
+mirror. A mismatch is **rejected, not corrected**. Two honest limits are documented in the
+allowlist: `.docx` and `.xlsx` are both a ZIP container when detected from bytes alone, and CSV
+is indistinguishable from any other delimited text. Neither weakens the actual threat model — an
+executable wearing a document's extension is caught regardless.
 
-1. ~~Version chain on supersede~~ · ~~signed download~~ · ~~`CloudinaryStorageBackend`~~ — done.
-2. Orphan sweep job (§16.7), 24-hour delay to avoid racing an in-flight upload.
-3. `ClamAvScanIT` — one test against a real `clamav/clamav` container asserting an EICAR upload
-   never leaves `QUARANTINED`. The fake in `DocumentUploadIT` proves the state machine only.
+**The chain's two rules**, both about what an inspection asks. A superseded version keeps its
+bytes, checksum and version number and stays readable, because "which protocol was in force on
+this date" is unanswerable if history is overwritten. And the current version **stays current
+until its replacement is published** — uploading an amendment is not approving one. Publishing
+is gated on `document:supersede`, not `document:upload`: a coordinator may upload an amendment,
+but retiring the protocol in force is the investigator's call.
 
 **Cloudinary, as built.** Assets upload as `type: authenticated`, because a default upload is
 publicly reachable by URL forever with nothing to revoke. That forces the download design:
 Cloudinary's plain `signed: true` URLs are tamper-proof but **never expire**, and its expiring
-`auth_token` scheme needs a paid add-on. The **private download API** is what carries
-`expires_at` inside the signature on the free tier, so that is what `signedDownloadUrl` uses.
-`CloudinaryStorageIT` proves both halves against the live service: a valid link serves the
-bytes, a tampered one and an expired one do not.
+`auth_token` scheme needs a paid add-on. The **private download API** carries `expires_at`
+inside the signature and *is* on the free tier, so that is what `signedDownloadUrl` uses — which
+is what makes §16.4's five minutes real rather than aspirational. `CloudinaryStorageIT` proves
+it against the live service: a valid link serves the bytes, a tampered one and an expired one do
+not. Credentials are in `backend/.env` and verified.
 
-**Cloudinary credentials** are needed only at step 6–7, to verify the real adapter once. Slots
-already exist in `backend/.env` (`CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`,
-`CLOUDINARY_API_SECRET`, `CLOUDINARY_FOLDER`). Everything before that runs against the local
-backend. The precedent for verifying against the real service is §5.1's Flyway bug: a
-dependency that looks configured and silently does nothing.
+### Left
+
+1. **Orphan sweep** (§16.7). A nightly job listing assets in the trial namespace, comparing
+   against `documents.cloudinary_public_id`, removing anything unreferenced for more than 24
+   hours. The delay avoids racing an in-flight upload.
+2. **`ClamAvScanIT`** — one test against a real `clamav/clamav` container asserting an EICAR
+   upload never leaves `QUARANTINED`. The fake in `DocumentUploadIT` proves the state machine
+   and nothing about detection, and "an infected upload never reaches AVAILABLE" is B6's stated
+   done-condition. Expect a ~1 GB one-time image pull and ~40 s for clamd to load signatures, so
+   tag it `external` alongside the Cloudinary tests.
 
 ---
 
-## 10 · Standing constraints
+## 11 · Standing constraints
 
 - Free tier throughout: Supabase Postgres (500 MB, no replicas, no backups, 7-day pause),
   Oracle Always Free VM (4 ARM cores / 24 GB) for the app + Redis + ClamAV, Vercel for the
