@@ -169,6 +169,42 @@ public class DocumentEntity {
         this.scannedAt = Instant.now();
     }
 
+    /**
+     * Promotes a scanned draft to the authoritative version.
+     *
+     * <p>Guarded here as well as by {@code ck_documents_available_requires_clean}, so the
+     * caller gets a 409 explaining the state rather than a constraint violation explaining
+     * nothing.
+     */
+    public void publish() {
+        requirePublishable();
+        this.status = CURRENT;
+    }
+
+    /**
+     * Checked before anything is written, so a refused publication does not first retire the
+     * version that is still in force.
+     */
+    public void requirePublishable() {
+        if (!SCAN_CLEAN.equals(scanStatus)) {
+            throw new IllegalDocumentStateException(
+                    "A document may only be published once its scan is clean; this one is "
+                            + scanStatus);
+        }
+    }
+
+    /**
+     * Retires this version in favour of another.
+     *
+     * <p>Nothing about the content changes. Which protocol was in force on a given date is
+     * unanswerable if history is rewritten, so a superseded version keeps its bytes, its
+     * checksum and its version number, and stays readable (§17.2).
+     */
+    public void supersededBy(DocumentEntity replacement) {
+        this.status = SUPERSEDED;
+        this.supersededById = replacement.getId();
+    }
+
     public boolean isDownloadable() {
         return SCAN_CLEAN.equals(scanStatus);
     }

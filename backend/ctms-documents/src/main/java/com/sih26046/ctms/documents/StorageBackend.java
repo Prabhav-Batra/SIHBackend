@@ -2,7 +2,9 @@ package com.sih26046.ctms.documents;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
 import java.nio.file.Path;
+import java.time.Duration;
 
 /**
  * Where document bytes live (§16.9, ADR-005).
@@ -35,4 +37,15 @@ public interface StorageBackend {
      * into a second fault.
      */
     void delete(String publicId, String resourceType);
+
+    /**
+     * A URL that grants access to these bytes until it expires.
+     *
+     * <p>Minted per request and never stored or cached (§12.2): a cached signed URL outlives
+     * the authorization that produced it, which is the whole property this design exists to
+     * avoid. The URL is itself the credential, so it carries no session and must be short.
+     *
+     * @param fileName what the browser should call the download; it does not affect access
+     */
+    URI signedDownloadUrl(String publicId, String resourceType, Duration ttl, String fileName);
 }
