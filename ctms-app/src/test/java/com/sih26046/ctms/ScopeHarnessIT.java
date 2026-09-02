@@ -112,6 +112,11 @@ class ScopeHarnessIT extends AbstractPostgresIT {
         EXPECTED.put("compliance_requirements", counts(1, 1, 1, 1, 1, 1, 1));
         EXPECTED.put("trial_compliance", counts(1, 1, 0, 0, 0, 0, 1));
 
+        // §8.24 — the administrator and the regulator read the whole trail; a PI reads their
+        // own trials'. The seeded entry carries no user_id, so it is reached only through the
+        // trial branch, which is the one worth testing.
+        EXPECTED.put("audit_logs", counts(1, 1, 0, 0, 0, 0, 1));
+
         // §8.12 — the strictest policy on the platform. Re-identification requires the
         // participant_identity:read permission, which V3 grants to no role at all, so every
         // role sees nothing even where the participant itself is in scope.
@@ -211,6 +216,7 @@ class ScopeHarnessIT extends AbstractPostgresIT {
         UUID document = document(owner, trialA, userByRole.get("PRINCIPAL_INVESTIGATOR"));
         UUID requirement = complianceRequirement(owner);
         trialCompliance(owner, trialA, requirement);
+        UUID auditEntry = auditEntry(owner, trialA);
 
         String trials = "'%s','%s'".formatted(trialA, trialB);
         COUNT_SQL.put(
@@ -287,6 +293,18 @@ class ScopeHarnessIT extends AbstractPostgresIT {
         COUNT_SQL.put(
                 "trial_compliance",
                 "SELECT count(*) FROM trial_compliance WHERE trial_id = '%s'".formatted(trialA));
+        COUNT_SQL.put(
+                "audit_logs",
+                "SELECT count(*) FROM audit_logs WHERE id = '%s'".formatted(auditEntry));
+    }
+
+    private static UUID auditEntry(JdbcTemplate t, UUID trial) {
+        return uuid(
+                t,
+                "INSERT INTO audit_logs (action, entity_type, entity_id, trial_id, outcome)"
+                        + " VALUES ('CREATE_TRIAL','trial',?::uuid,?::uuid,'SUCCESS') RETURNING id",
+                trial.toString(),
+                trial.toString());
     }
 
     private static UUID adverseEvent(
