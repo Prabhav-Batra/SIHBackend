@@ -38,4 +38,31 @@ subprojects {
         useJUnitPlatform()
         testLogging { events("passed", "skipped", "failed") }
     }
+
+    // ./gradlew externalTest — verifies the adapters against the real services.
+    // Registered inside plugins.withType so the source sets exist: reaching for them at the
+    // top of the subprojects block finds only ExtraPropertiesExtension.
+    plugins.withType<JavaPlugin> {
+        val sources = extensions.getByType<SourceSetContainer>()
+
+        // Only the standard `test` task excludes external tests. Putting this in
+        // configureEach would apply it to externalTest as well, and a task that both
+        // includes and excludes a tag runs nothing at all — while still reporting
+        // BUILD SUCCESSFUL, which is the worst way for a verification task to fail.
+        tasks.named<Test>("test") {
+            useJUnitPlatform {
+                // Opt-in: these need credentials and the network, and write to a live account.
+                excludeTags("external")
+            }
+        }
+        tasks.register<Test>("externalTest") {
+            description = "Runs tests tagged 'external' against real third-party services."
+            group = "verification"
+            testClassesDirs = sources["test"].output.classesDirs
+            classpath = sources["test"].runtimeClasspath
+            useJUnitPlatform { includeTags("external") }
+            // A live service can change under us; a cached "up to date" would hide that.
+            outputs.upToDateWhen { false }
+        }
+    }
 }

@@ -34,6 +34,19 @@ public class DocumentsConfig {
     }
 
     @Bean
+    @ConditionalOnProperty(name = "ctms.documents.storage-backend", havingValue = "cloudinary")
+    StorageBackend cloudinaryStorageBackend(DocumentProperties properties) {
+        if (!properties.cloudinary().isConfigured()) {
+            // Failing at startup rather than at the first upload. A deployment that believes
+            // it is storing documents and is not is the worst of the available outcomes.
+            throw new IllegalStateException(
+                    "ctms.documents.storage-backend=cloudinary requires cloud-name, api-key"
+                            + " and api-secret");
+        }
+        return new CloudinaryStorageBackend(properties.cloudinary());
+    }
+
+    @Bean
     @ConditionalOnProperty(
             name = "ctms.documents.scanner",
             havingValue = "clamav",
