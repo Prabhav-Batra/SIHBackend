@@ -11,6 +11,7 @@ import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
+import java.util.List;
 import java.util.HexFormat;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
@@ -62,6 +63,93 @@ public class DocumentService {
      */
     @Transactional
     public DocumentEntity upload(MultipartFile file, UploadRequest request, UUID uploader) {
+        UUID id = UUID.randomUUID();
+        // Version 1 opens its own family (§17.2).
+        return store(file, request, uploader, id, id, 1);
+    }
+
+    /**
+     * Adds the next version to an existing document's family.
+     *
+     * <p>The previous version is not touched. An amendment that has been uploaded is not yet an
+     * amendment that has been approved, and the version people are working from must stay
+     * current until its replacement is published.
+     */
+    @Transactional
+    public DocumentEntity addVersion(
+            MultipartFile file, UUID previousId, String title, UUID uploader) {
+
+        DocumentEntity previous = require(previousId);
+        List<DocumentEntity> family =
+                documents.findAllByDocumentFamilyIdOrderByVersion(previous.getDocumentFamilyId());
+        int next = family.stream().mapToInt(DocumentEntity::getVersion).max().orElse(0) + 1;
+
+        // Scope and classification are properties of the family, not of the upload: a new
+        // version of a site's consent form is still that site's consent form, and letting a
+        // caller restate them would let version 2 land somewhere version 1 could not.
+        UploadRequest request =
+                new UploadRequest(
+                        previous.getTrialId(),
+                        previous.getInstitutionId(),
+                        previous.getTrialSiteId(),
+                        previous.getDocumentType(),
+                        title == null || title.isBlank() ? previous.getTitle() : title,
+                        null,
+                        null,
+                        previousId);
+
+        return store(
+                file, request, uploader, UUID.randomUUID(), previous.getDocumentFamilyId(), next);
+    }
+
+    /**
+     * Makes a scanned draft the authoritative version, retiring whichever version held that
+     * position.
+     *
+     * <p>One transaction, because a family with two CURRENT versions — or none — is a worse
+     * state than either outcome. The promotion and the demotion are the same decision.
+     */
+    @Transactional
+    public DocumentEntity publish(UUID id) {
+        DocumentEntity promoted = require(id);
+        // Before any write, so a refused publication does not retire the version in force.
+        promoted.requirePublishable();
+
+        // Demote first, and flush before promoting. uq_documents_one_current_per_family is a
+        // partial unique index, and an index — unlike a constraint — cannot be deferred to
+        // commit. Promoting first leaves two CURRENT rows for the length of one statement,
+        // which is long enough to be rejected.
+        List<DocumentEntity> retiring =
+                documents.findAllByDocumentFamilyIdOrderByVersion(promoted.getDocumentFamilyId())
+                        .stream()
+                        .filter(d -> !d.getId().equals(id))
+                        .filter(d -> DocumentEntity.CURRENT.equals(d.getStatus()))
+                        .toList();
+        retiring.forEach(d -> d.supersededBy(promoted));
+        documents.saveAllAndFlush(retiring);
+
+        promoted.publish();
+        return documents.saveAndFlush(promoted);
+    }
+
+    public DocumentEntity require(UUID id) {
+        // RLS has already filtered: out of scope and non-existent are the same answer (§6.4).
+        return documents.findById(id).orElseThrow(() -> new DocumentNotFoundException(id));
+    }
+
+    public List<DocumentEntity> versionsOf(UUID id) {
+        return documents.findAllByDocumentFamilyIdOrderByVersion(
+                require(id).getDocumentFamilyId());
+    }
+
+    private DocumentEntity store(
+            MultipartFile file,
+            UploadRequest request,
+            UUID uploader,
+            UUID id,
+            UUID familyId,
+            int version) {
+
         Path spooled = spool(file);
         StoredObject stored = null;
         try {
@@ -70,8 +158,6 @@ public class DocumentService {
                             file.getOriginalFilename(), Files.size(spooled), open(spooled));
 
             String checksum = sha256(spooled);
-            UUID id = UUID.randomUUID();
-
             stored =
                     storage.put(
                             id.toString(), validated.resourceType(), validated.mimeType(), spooled);
@@ -80,9 +166,8 @@ public class DocumentService {
                     documents.saveAndFlush(
                             new DocumentEntity(
                                     id,
-                                    // Version 1 opens its own family (§17.2).
-                                    id,
-                                    1,
+                                    familyId,
+                                    version,
                                     request.trialId(),
                                     request.institutionId(),
                                     request.trialSiteId(),

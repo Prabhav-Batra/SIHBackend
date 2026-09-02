@@ -41,6 +41,13 @@ public class SecurityConfig {
                                 auth.requestMatchers(
                                                 "/api/v1/auth/login",
                                                 "/api/v1/auth/refresh",
+                                                // A signed download URL is itself the
+                                                // credential (§16.4). It must be followable by
+                                                // a browser redirect without a session, and it
+                                                // expires in five minutes; the endpoint behind
+                                                // it verifies the signature before serving a
+                                                // byte.
+                                                "/api/v1/documents/content",
                                                 "/actuator/health/**")
                                         .permitAll()
                                         .anyRequest()

@@ -3,9 +3,13 @@ package com.sih26046.ctms.documents;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
+import java.net.URI;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.time.Duration;
 
 /**
  * Filesystem storage.
@@ -49,6 +53,25 @@ public class LocalStorageBackend implements StorageBackend {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    @Override
+    public URI signedDownloadUrl(
+            String publicId, String resourceType, Duration ttl, String fileName) {
+        long expires = SignedUrls.expiryFor(ttl);
+        return URI.create(
+                "%s?id=%s&type=%s&name=%s&expires=%d&signature=%s"
+                        .formatted(
+                                LocalContentController.PATH,
+                                encode(publicId),
+                                encode(resourceType),
+                                encode(fileName),
+                                expires,
+                                SignedUrls.sign(publicId, resourceType, expires)));
+    }
+
+    private static String encode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
     private Path resolve(String publicId, String resourceType) {
