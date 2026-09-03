@@ -24,7 +24,7 @@ class SitesAndStaffApiIT extends ApiTestSupport {
     private static UUID institutionId;
     private static boolean seeded;
 
-    private Cookie investigator;
+    private Cookie[] investigator;
     private String trialId;
 
     @BeforeEach
@@ -51,6 +51,7 @@ class SitesAndStaffApiIT extends ApiTestSupport {
                 mockMvc.perform(
                                 post("/api/v1/trials")
                                         .cookie(investigator)
+                                        .with(csrf(investigator))
                                         .contentType(MediaType.APPLICATION_JSON)
                                         .content(
                                                 """
@@ -65,10 +66,11 @@ class SitesAndStaffApiIT extends ApiTestSupport {
         trialId = read(created, "$.id");
     }
 
-    private MvcResult createSite(Cookie auth, String code) throws Exception {
+    private MvcResult createSite(Cookie[] auth, String code) throws Exception {
         return mockMvc.perform(
                         post("/api/v1/sites")
                                 .cookie(auth)
+                                .with(csrf(auth))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         """
@@ -136,11 +138,12 @@ class SitesAndStaffApiIT extends ApiTestSupport {
                                 UUID.randomUUID() + "@example.in"));
     }
 
-    private MvcResult assign(Cookie auth, UUID userId, String siteId) throws Exception {
+    private MvcResult assign(Cookie[] auth, UUID userId, String siteId) throws Exception {
         String site = siteId == null ? "null" : "\"" + siteId + "\"";
         return mockMvc.perform(
                         post("/api/v1/trial-staff")
                                 .cookie(auth)
+                                .with(csrf(auth))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         """
@@ -214,7 +217,10 @@ class SitesAndStaffApiIT extends ApiTestSupport {
         mockMvc.perform(get("/api/v1/trials/" + trialId).cookie(signIn(email)))
                 .andExpect(status().isOk());
 
-        mockMvc.perform(delete("/api/v1/trial-staff/" + assignmentId).cookie(investigator))
+        mockMvc.perform(
+                        delete("/api/v1/trial-staff/" + assignmentId)
+                                .cookie(investigator)
+                                .with(csrf(investigator)))
                 .andExpect(status().isNoContent());
 
         mockMvc.perform(get("/api/v1/trials/" + trialId).cookie(signIn(email)))

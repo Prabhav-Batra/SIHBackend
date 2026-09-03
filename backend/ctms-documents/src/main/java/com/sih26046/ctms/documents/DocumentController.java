@@ -189,8 +189,9 @@ public class DocumentController {
      */
     @PostMapping("/{id}/publish")
     @PreAuthorize("hasAuthority('document:supersede')")
-    public DocumentView publish(@PathVariable UUID id) {
-        return DocumentView.of(service.publish(id));
+    public DocumentView publish(
+            @PathVariable UUID id, @AuthenticationPrincipal CurrentUser caller) {
+        return DocumentView.of(service.publish(id, caller.userId()));
     }
 
     // ── download, §16.4 ──────────────────────────────────────────────────────

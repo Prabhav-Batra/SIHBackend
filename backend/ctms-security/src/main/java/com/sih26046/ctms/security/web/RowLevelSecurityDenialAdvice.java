@@ -1,9 +1,13 @@
 package com.sih26046.ctms.security.web;
 
+import com.sih26046.ctms.audit.AuditTrail;
+import com.sih26046.ctms.security.CurrentUser;
+import jakarta.servlet.http.HttpServletRequest;
 import java.sql.SQLException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -29,11 +33,22 @@ public class RowLevelSecurityDenialAdvice {
 
     private static final String INSUFFICIENT_PRIVILEGE = "42501";
 
+    private final AuditTrail audit;
+
+    public RowLevelSecurityDenialAdvice(AuditTrail audit) {
+        this.audit = audit;
+    }
+
     @ExceptionHandler(DataAccessException.class)
-    public ResponseEntity<String> onDataAccessException(DataAccessException e) {
+    public ResponseEntity<String> onDataAccessException(
+            DataAccessException e, HttpServletRequest request) {
         for (Throwable cause = e; cause != null; cause = cause.getCause()) {
             if (cause instanceof SQLException sql
                     && INSUFFICIENT_PRIVILEGE.equals(sql.getSQLState())) {
+                // Coarse-grained on purpose: the advice sees only the exception, not which
+                // business action was attempted. "Who was refused, on what path, and when" is
+                // still exactly what §19.6's failed-access query needs.
+                audit.recordDenied(callerId(), request.getMethod() + " " + request.getRequestURI(), "rls_policy");
                 return ResponseEntity.status(HttpStatus.FORBIDDEN)
                         .body("The record is outside your scope");
             }
@@ -42,5 +57,12 @@ public class RowLevelSecurityDenialAdvice {
             }
         }
         throw e;
+    }
+
+    private static java.util.UUID callerId() {
+        Object principal = SecurityContextHolder.getContext().getAuthentication() == null
+                ? null
+                : SecurityContextHolder.getContext().getAuthentication().getPrincipal();
+        return principal instanceof CurrentUser user ? user.userId() : null;
     }
 }

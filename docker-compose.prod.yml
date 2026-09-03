@@ -1,0 +1,86 @@
+# Deployed topology: Oracle Cloud Always Free VM + Supabase Postgres (spec §4).
+#
+# What's deliberately absent, and why:
+#   - postgres    Supabase-hosted (managed, 500 MB free tier). The app connects out to it
+#                 over the network (CTMS_DB_URL) — nothing to run here.
+#   - redis       B8 already decided against building the Redis L2 cache at single-instance
+#                 scale (see BACKEND_CONTEXT.md §12); Bucket4j rate limiting and the
+#                 idempotency store are in-memory for the same reason. Running an unused
+#                 Redis container would spend VM resources on nothing.
+#   - a frontend  No frontend exists yet (only FRONTEND_REQUIREMENTS.md as a spec) — this
+#                 compose file serves the API directly behind Caddy on its own domain. The
+#                 Vercel rewrite-proxy piece of the original design (spec §6.4) is future
+#                 work for whenever a frontend is actually built.
+#
+# Run from the repo root on the VM: docker compose -f docker-compose.prod.yml up -d
+services:
+  app:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: oracle
+      CTMS_DB_URL: ${CTMS_DB_URL}
+      CTMS_DB_USER: ${CTMS_DB_USER}
+      CTMS_DB_PASSWORD: ${CTMS_DB_PASSWORD}
+      CTMS_JWT_SECRET: ${CTMS_JWT_SECRET}
+      CTMS_DOCUMENTS_STORAGEBACKEND: cloudinary
+      CTMS_DOCUMENTS_CLOUDINARY_CLOUDNAME: ${CLOUDINARY_CLOUD_NAME}
+      CTMS_DOCUMENTS_CLOUDINARY_APIKEY: ${CLOUDINARY_API_KEY}
+      CTMS_DOCUMENTS_CLOUDINARY_APISECRET: ${CLOUDINARY_API_SECRET}
+      CTMS_DOCUMENTS_CLAMAV_HOST: clamav
+    depends_on:
+      clamav:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health/liveness"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    expose: ["8080"]
+
+  clamav:
+    image: clamav/clamav:stable
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "clamdscan", "--ping", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [app]
+
+  prometheus:
+    image: prom/prometheus:latest
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    expose: ["9090"]
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+    volumes:
+      - grafana_data:/var/lib/grafana
+    expose: ["3000"]
+    depends_on: [prometheus]
+
+volumes:
+  caddy_data:
+  caddy_config:
+  prometheus_data:
+  grafana_data:

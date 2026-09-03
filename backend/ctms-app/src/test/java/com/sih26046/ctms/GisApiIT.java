@@ -49,7 +49,7 @@ class GisApiIT extends ApiTestSupport {
     private String state;
     private String cityA;
     private String cityB;
-    private Cookie investigator;
+    private Cookie[] investigator;
     private UUID institutionA; // Delhi
     private UUID institutionB; // Mumbai
     private String trialA;
@@ -102,6 +102,7 @@ class GisApiIT extends ApiTestSupport {
                 mockMvc.perform(
                                 post("/api/v1/trials")
                                         .cookie(investigator)
+                                        .with(csrf(investigator))
                                         .contentType(MediaType.APPLICATION_JSON)
                                         .content(
                                                 """
@@ -122,6 +123,7 @@ class GisApiIT extends ApiTestSupport {
                 mockMvc.perform(
                                 post("/api/v1/sites")
                                         .cookie(investigator)
+                                        .with(csrf(investigator))
                                         .contentType(MediaType.APPLICATION_JSON)
                                         .content(
                                                 """
@@ -155,6 +157,7 @@ class GisApiIT extends ApiTestSupport {
         mockMvc.perform(
                         post("/api/v1/trials/" + trialId + "/status")
                                 .cookie(investigator)
+                                .with(csrf(investigator))
                                 .header("If-Match", etag)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"status\":\"%s\"}".formatted(status)))
@@ -171,6 +174,7 @@ class GisApiIT extends ApiTestSupport {
                 mockMvc.perform(
                                 post("/api/v1/participants")
                                         .cookie(investigator)
+                                        .with(csrf(investigator))
                                         .contentType(MediaType.APPLICATION_JSON)
                                         .content(
                                                 """
@@ -196,6 +200,7 @@ class GisApiIT extends ApiTestSupport {
         mockMvc.perform(
                         post("/api/v1/adverse-events")
                                 .cookie(investigator)
+                                .with(csrf(investigator))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         """
@@ -208,7 +213,7 @@ class GisApiIT extends ApiTestSupport {
                 .andExpect(status().isCreated());
     }
 
-    private UUID userIdOf(Cookie cookie) throws Exception {
+    private UUID userIdOf(Cookie[] cookie) throws Exception {
         return UUID.fromString(
                 read(mockMvc.perform(get("/api/v1/auth/me").cookie(cookie)).andReturn(), "$.userId"));
     }
@@ -217,6 +222,7 @@ class GisApiIT extends ApiTestSupport {
         mockMvc.perform(
                         post("/api/v1/trial-staff")
                                 .cookie(investigator)
+                                .with(csrf(investigator))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         """
@@ -238,7 +244,7 @@ class GisApiIT extends ApiTestSupport {
     @Test
     void theBaseMapShowsSitesOutsideTheCallersAssignmentEvenThoughSitesReadDoesNot()
             throws Exception {
-        Cookie staff = loginAs("RESEARCH_STAFF");
+        Cookie[] staff = loginAs("RESEARCH_STAFF");
         assignStaffToSite(trialA, siteA, userIdOf(staff));
 
         // The ordinary, clinically-scoped endpoint: exactly what §8.9's RLS promises — this
@@ -383,7 +389,7 @@ class GisApiIT extends ApiTestSupport {
     @Test
     void drilldownOnASiteOutsideTheCallersTrialIs404() throws Exception {
         // This investigator is assigned to trial A, not B.
-        Cookie otherInvestigator = loginAs("PRINCIPAL_INVESTIGATOR");
+        Cookie[] otherInvestigator = loginAs("PRINCIPAL_INVESTIGATOR");
         mockMvc.perform(get("/api/v1/gis/sites/" + siteA + "/detail").cookie(otherInvestigator))
                 .andExpect(status().isNotFound());
     }
@@ -423,7 +429,7 @@ class GisApiIT extends ApiTestSupport {
         // RESEARCH_STAFF holds no compliance:read at all (§6.3) — genuinely assigned to this
         // exact site, so the request clears RLS scope and reaches the compliance gate itself
         // rather than 404ing before it, which would pass this assertion for the wrong reason.
-        Cookie staff = loginAs("RESEARCH_STAFF");
+        Cookie[] staff = loginAs("RESEARCH_STAFF");
         assignStaffToSite(trialA, siteA, userIdOf(staff));
         mockMvc.perform(get("/api/v1/gis/sites/" + siteA + "/detail").cookie(staff))
                 .andExpect(status().isOk())

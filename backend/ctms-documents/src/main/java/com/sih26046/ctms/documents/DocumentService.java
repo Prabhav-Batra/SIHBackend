@@ -1,5 +1,6 @@
 package com.sih26046.ctms.documents;
 
+import com.sih26046.ctms.audit.AuditTrail;
 import com.sih26046.ctms.jobs.JobQueue;
 import java.io.IOException;
 import java.io.InputStream;
@@ -11,8 +12,10 @@ import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.HexFormat;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,16 +32,19 @@ public class DocumentService {
     private final StorageBackend storage;
     private final UploadValidator validator;
     private final JobQueue jobs;
+    private final AuditTrail audit;
 
     public DocumentService(
             DocumentRepository documents,
             StorageBackend storage,
             UploadValidator validator,
-            JobQueue jobs) {
+            JobQueue jobs,
+            AuditTrail audit) {
         this.documents = documents;
         this.storage = storage;
         this.validator = validator;
         this.jobs = jobs;
+        this.audit = audit;
     }
 
     /** What the caller asked to store, apart from the bytes. */
@@ -110,10 +116,11 @@ public class DocumentService {
      * state than either outcome. The promotion and the demotion are the same decision.
      */
     @Transactional
-    public DocumentEntity publish(UUID id) {
+    public DocumentEntity publish(UUID id, UUID publishedBy) {
         DocumentEntity promoted = require(id);
         // Before any write, so a refused publication does not retire the version in force.
         promoted.requirePublishable();
+        String previousStatus = promoted.getStatus();
 
         // Demote first, and flush before promoting. uq_documents_one_current_per_family is a
         // partial unique index, and an index — unlike a constraint — cannot be deferred to
@@ -129,7 +136,18 @@ public class DocumentService {
         documents.saveAllAndFlush(retiring);
 
         promoted.publish();
-        return documents.saveAndFlush(promoted);
+        DocumentEntity saved = documents.saveAndFlush(promoted);
+
+        audit.recordChange(
+                publishedBy,
+                "SUPERSEDE_DOCUMENT",
+                "documents",
+                saved.getId(),
+                saved.getTrialId(),
+                Map.of("status", previousStatus),
+                Map.of("status", saved.getStatus()));
+
+        return saved;
     }
 
     public DocumentEntity require(UUID id) {
@@ -185,6 +203,25 @@ public class DocumentService {
             // Enqueued in this transaction, so a rollback takes the job with it. A broker
             // would need an outbox to promise the same (§10).
             jobs.enqueue(SCAN_JOB, payloadFor(saved.getId()));
+
+            Map<String, Object> newValues = new LinkedHashMap<>();
+            newValues.put("documentFamilyId", saved.getDocumentFamilyId());
+            newValues.put("trialId", saved.getTrialId());
+            newValues.put("institutionId", saved.getInstitutionId());
+            newValues.put("trialSiteId", saved.getTrialSiteId());
+            newValues.put("documentType", saved.getDocumentType());
+            newValues.put("title", saved.getTitle());
+            newValues.put("version", saved.getVersion());
+            newValues.put("status", saved.getStatus());
+            audit.recordChange(
+                    uploader,
+                    "UPLOAD_DOCUMENT",
+                    "documents",
+                    saved.getId(),
+                    saved.getTrialId(),
+                    null,
+                    newValues);
+
             return saved;
 
         } catch (IOException e) {

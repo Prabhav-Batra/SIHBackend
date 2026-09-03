@@ -29,10 +29,11 @@ class InstitutionsApiIT extends ApiTestSupport {
                 .formatted(name, lat, lon);
     }
 
-    private MvcResult create(Cookie auth, Double lat, Double lon) throws Exception {
+    private MvcResult create(Cookie[] auth, Double lat, Double lon) throws Exception {
         return mockMvc.perform(
                         post("/api/v1/institutions")
                                 .cookie(auth)
+                                .with(csrf(auth))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(body("Institute " + UUID.randomUUID(), lat, lon)))
                 .andReturn();
@@ -92,7 +93,7 @@ class InstitutionsApiIT extends ApiTestSupport {
 
     @Test
     void updatingRequiresIfMatchAndAdvancesTheEtag() throws Exception {
-        Cookie admin = loginAs("SYSTEM_ADMIN");
+        Cookie[] admin = loginAs("SYSTEM_ADMIN");
         MvcResult created = create(admin, 28.6139, 77.2090);
         String id = read(created, "$.id");
         String etag = created.getResponse().getHeader(HttpHeaders.ETAG);
@@ -100,6 +101,7 @@ class InstitutionsApiIT extends ApiTestSupport {
         mockMvc.perform(
                         patch("/api/v1/institutions/" + id)
                                 .cookie(admin)
+                                .with(csrf(admin))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"city\":\"New Delhi\"}"))
                 .andExpect(status().isPreconditionRequired());
@@ -108,6 +110,7 @@ class InstitutionsApiIT extends ApiTestSupport {
                 mockMvc.perform(
                                 patch("/api/v1/institutions/" + id)
                                         .cookie(admin)
+                                        .with(csrf(admin))
                                         .header(HttpHeaders.IF_MATCH, etag)
                                         .contentType(MediaType.APPLICATION_JSON)
                                         .content("{\"city\":\"New Delhi\"}"))
@@ -120,7 +123,7 @@ class InstitutionsApiIT extends ApiTestSupport {
 
     @Test
     void aStaleUpdateIsRejected() throws Exception {
-        Cookie admin = loginAs("SYSTEM_ADMIN");
+        Cookie[] admin = loginAs("SYSTEM_ADMIN");
         MvcResult created = create(admin, 28.6139, 77.2090);
         String id = read(created, "$.id");
         String stale = created.getResponse().getHeader(HttpHeaders.ETAG);
@@ -128,6 +131,7 @@ class InstitutionsApiIT extends ApiTestSupport {
         mockMvc.perform(
                         patch("/api/v1/institutions/" + id)
                                 .cookie(admin)
+                                .with(csrf(admin))
                                 .header(HttpHeaders.IF_MATCH, stale)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"city\":\"First\"}"))
@@ -136,6 +140,7 @@ class InstitutionsApiIT extends ApiTestSupport {
         mockMvc.perform(
                         patch("/api/v1/institutions/" + id)
                                 .cookie(admin)
+                                .with(csrf(admin))
                                 .header(HttpHeaders.IF_MATCH, stale)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"city\":\"Second\"}"))

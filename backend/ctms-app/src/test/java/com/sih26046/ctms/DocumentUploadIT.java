@@ -109,7 +109,7 @@ class DocumentUploadIT extends ApiTestSupport {
 
     private static UUID institutionId;
 
-    private Cookie investigator;
+    private Cookie[] investigator;
     private String trialId;
 
     @BeforeEach
@@ -141,6 +141,7 @@ class DocumentUploadIT extends ApiTestSupport {
                         mockMvc.perform(
                                         post("/api/v1/trials")
                                                 .cookie(investigator)
+                                                .with(csrf(investigator))
                                                 .contentType(MediaType.APPLICATION_JSON)
                                                 .content(
                                                         """
@@ -162,7 +163,8 @@ class DocumentUploadIT extends ApiTestSupport {
                                 .param("trialId", trialId)
                                 .param("documentType", "PROTOCOL")
                                 .param("title", "Study protocol")
-                                .cookie(investigator))
+                                .cookie(investigator)
+                                .with(csrf(investigator)))
                 .andReturn();
     }
 
@@ -194,7 +196,8 @@ class DocumentUploadIT extends ApiTestSupport {
                                 .param("trialId", trialId)
                                 .param("documentType", "PROTOCOL")
                                 .param("title", "Study protocol")
-                                .cookie(investigator))
+                                .cookie(investigator)
+                                .with(csrf(investigator)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value("PENDING_SCAN"))
                 .andExpect(jsonPath("$.scanStatus").value("PENDING"))

@@ -30,7 +30,7 @@ class SafetyApiIT extends ApiTestSupport {
     private static UUID institutionId;
     private static boolean seeded;
 
-    private Cookie investigator;
+    private Cookie[] investigator;
     private String trialId;
     private String siteId;
 
@@ -58,6 +58,7 @@ class SafetyApiIT extends ApiTestSupport {
                         mockMvc.perform(
                                         post("/api/v1/trials")
                                                 .cookie(investigator)
+                                                .with(csrf(investigator))
                                                 .contentType(MediaType.APPLICATION_JSON)
                                                 .content(
                                                         """
@@ -75,6 +76,7 @@ class SafetyApiIT extends ApiTestSupport {
                         mockMvc.perform(
                                         post("/api/v1/sites")
                                                 .cookie(investigator)
+                                                .with(csrf(investigator))
                                                 .contentType(MediaType.APPLICATION_JSON)
                                                 .content(
                                                         """
@@ -100,6 +102,7 @@ class SafetyApiIT extends ApiTestSupport {
             mockMvc.perform(
                             post("/api/v1/trials/" + trialId + "/status")
                                     .cookie(investigator)
+                                    .with(csrf(investigator))
                                     .header("If-Match", etag)
                                     .contentType(MediaType.APPLICATION_JSON)
                                     .content("{\"status\":\"%s\"}".formatted(next)))
@@ -112,6 +115,7 @@ class SafetyApiIT extends ApiTestSupport {
                 mockMvc.perform(
                                 post("/api/v1/participants")
                                         .cookie(investigator)
+                                        .with(csrf(investigator))
                                         .contentType(MediaType.APPLICATION_JSON)
                                         .content(
                                                 """
@@ -140,6 +144,7 @@ class SafetyApiIT extends ApiTestSupport {
                         mockMvc.perform(
                                         post("/api/v1/visits")
                                                 .cookie(investigator)
+                                                .with(csrf(investigator))
                                                 .contentType(MediaType.APPLICATION_JSON)
                                                 .content(
                                                         """
@@ -154,6 +159,7 @@ class SafetyApiIT extends ApiTestSupport {
         mockMvc.perform(
                         post("/api/v1/observations")
                                 .cookie(investigator)
+                                .with(csrf(investigator))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         """
@@ -166,11 +172,12 @@ class SafetyApiIT extends ApiTestSupport {
         return visitId;
     }
 
-    private MvcResult reportEvent(Cookie auth, String participantId, String seriousness,
+    private MvcResult reportEvent(Cookie[] auth, String participantId, String seriousness,
             String criteria) throws Exception {
         return mockMvc.perform(
                         post("/api/v1/adverse-events")
                                 .cookie(auth)
+                                .with(csrf(auth))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         """
@@ -303,10 +310,12 @@ class SafetyApiIT extends ApiTestSupport {
         givenAnActiveTrial();
         String eventId = read(reportEvent(investigator, enrol(), "NON_SERIOUS", "null"), "$.id");
 
+        Cookie[] safetyOfficer = loginAs("SAFETY_OFFICER");
         MvcResult review =
                 mockMvc.perform(
                                 post("/api/v1/safety/reviews")
-                                        .cookie(loginAs("SAFETY_OFFICER"))
+                                        .cookie(safetyOfficer)
+                                        .with(csrf(safetyOfficer))
                                         .contentType(MediaType.APPLICATION_JSON)
                                         .content(
                                                 """
@@ -338,6 +347,7 @@ class SafetyApiIT extends ApiTestSupport {
         mockMvc.perform(
                         post("/api/v1/safety/reviews")
                                 .cookie(investigator)
+                                .with(csrf(investigator))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         """

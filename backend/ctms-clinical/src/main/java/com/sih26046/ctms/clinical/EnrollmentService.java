@@ -1,6 +1,9 @@
 package com.sih26046.ctms.clinical;
 
+import com.sih26046.ctms.audit.AuditTrail;
 import com.sih26046.ctms.security.CurrentUser;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,14 +24,17 @@ public class EnrollmentService {
     private final ParticipantRepository participants;
     private final ParticipantIdentityRepository identities;
     private final ConsentRepository consents;
+    private final AuditTrail audit;
 
     public EnrollmentService(
             ParticipantRepository participants,
             ParticipantIdentityRepository identities,
-            ConsentRepository consents) {
+            ConsentRepository consents,
+            AuditTrail audit) {
         this.participants = participants;
         this.identities = identities;
         this.consents = consents;
+        this.audit = audit;
     }
 
     /**
@@ -79,6 +85,20 @@ public class EnrollmentService {
         participants.incrementTrialEnrollment(request.trialId());
         participants.incrementSiteEnrollment(request.trialSiteId());
         participants.flush();
+
+        Map<String, Object> newValues = new LinkedHashMap<>();
+        newValues.put("trialId", participant.getTrialId());
+        newValues.put("trialSiteId", participant.getTrialSiteId());
+        newValues.put("subjectCode", participant.getSubjectCode());
+        newValues.put("status", participant.getStatus());
+        audit.recordChange(
+                actor.userId(),
+                "CREATE_PARTICIPANT",
+                "participants",
+                participant.getId(),
+                participant.getTrialId(),
+                null,
+                newValues);
 
         return participant;
     }

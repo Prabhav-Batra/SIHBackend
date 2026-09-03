@@ -79,3 +79,10 @@ server:
 logging:
   level:
     root: INFO
+  # §12, §18.17, §30.3 — every line carries the same request id a client sees in an error
+  # body and an audit row carries in its own request_id column, so the three can be joined
+  # by hand without a log aggregator. RequestIdFilter populates the MDC key; it is empty
+  # (and the brackets collapse to "[]") for anything logged outside a request, e.g. at
+  # startup or from a @Scheduled job.
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%thread] [%X{requestId}] %logger{36} - %msg%n"

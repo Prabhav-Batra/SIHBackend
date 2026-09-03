@@ -1,12 +1,15 @@
 package com.sih26046.ctms.clinical;
 
+import com.sih26046.ctms.audit.AuditTrail;
 import com.sih26046.ctms.security.CurrentUser;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -37,16 +40,19 @@ public class ClinicalController {
     private final VisitRepository visits;
     private final ObservationRepository observations;
     private final MedicationRepository medications;
+    private final AuditTrail audit;
 
     public ClinicalController(
             ClinicalWriteGuard guard,
             VisitRepository visits,
             ObservationRepository observations,
-            MedicationRepository medications) {
+            MedicationRepository medications,
+            AuditTrail audit) {
         this.guard = guard;
         this.visits = visits;
         this.observations = observations;
         this.medications = medications;
+        this.audit = audit;
     }
 
     // ── visits ───────────────────────────────────────────────────────────────
@@ -90,7 +96,8 @@ public class ClinicalController {
     @PostMapping("/visits")
     @PreAuthorize("hasAuthority('visit:create')")
     @Transactional
-    public ResponseEntity<VisitView> createVisit(@Valid @RequestBody CreateVisit request) {
+    public ResponseEntity<VisitView> createVisit(
+            @Valid @RequestBody CreateVisit request, @AuthenticationPrincipal CurrentUser caller) {
         guard.requireCollectable(request.participantId());
 
         VisitEntity saved =
@@ -101,6 +108,19 @@ public class ClinicalController {
                                 request.visitName(),
                                 request.visitNumber(),
                                 request.scheduledDate()));
+
+        // §21.2's clinical entities carry no trial_id column of their own — resolving one here
+        // would mean an extra join purely for this audit row, so, per the B9 brief, it is left
+        // null rather than adding a lookup whose only purpose is populating one column.
+        Map<String, Object> newValues = new LinkedHashMap<>();
+        newValues.put("participantId", saved.getParticipantId());
+        newValues.put("visitName", saved.getVisitName());
+        newValues.put("visitNumber", saved.getVisitNumber());
+        newValues.put("scheduledDate", saved.getScheduledDate());
+        newValues.put("status", saved.getStatus());
+        audit.recordChange(
+                caller.userId(), "CREATE_VISIT", "visits", saved.getId(), null, null, newValues);
+
         return ResponseEntity.status(HttpStatus.CREATED).body(VisitView.of(saved));
     }
 
@@ -176,6 +196,29 @@ public class ClinicalController {
                                 request.valueBoolean(),
                                 request.unit(),
                                 caller.userId()));
+
+        // valueNumeric/valueText/valueBoolean are clinical measurements — Redaction masks them
+        // by field name (§19.5) once they reach AuditTrail, so the real values are passed
+        // through here rather than pre-redacted.
+        Map<String, Object> newValues = new LinkedHashMap<>();
+        newValues.put("visitId", saved.getVisitId());
+        newValues.put("observationCode", saved.getObservationCode());
+        newValues.put("observationName", saved.getObservationName());
+        newValues.put("category", saved.getCategory());
+        newValues.put("valueNumeric", saved.getValueNumeric());
+        newValues.put("valueText", saved.getValueText());
+        newValues.put("valueBoolean", saved.getValueBoolean());
+        newValues.put("unit", saved.getUnit());
+        newValues.put("status", saved.getStatus());
+        audit.recordChange(
+                caller.userId(),
+                "CREATE_OBSERVATION",
+                "observations",
+                saved.getId(),
+                null,
+                null,
+                newValues);
+
         return ResponseEntity.status(HttpStatus.CREATED).body(ObservationView.of(saved));
     }
 
@@ -227,7 +270,8 @@ public class ClinicalController {
     @PreAuthorize("hasAuthority('medication:create')")
     @Transactional
     public ResponseEntity<MedicationView> createMedication(
-            @Valid @RequestBody CreateMedication request) {
+            @Valid @RequestBody CreateMedication request,
+            @AuthenticationPrincipal CurrentUser caller) {
         guard.requireCollectable(request.participantId());
 
         MedicationEntity saved =
@@ -240,6 +284,24 @@ public class ClinicalController {
                                 request.dose(),
                                 request.route(),
                                 request.startDate()));
+
+        Map<String, Object> newValues = new LinkedHashMap<>();
+        newValues.put("participantId", saved.getParticipantId());
+        newValues.put("medicationName", saved.getMedicationName());
+        newValues.put("medicationType", saved.getMedicationType());
+        newValues.put("dose", saved.getDose());
+        newValues.put("route", saved.getRoute());
+        newValues.put("startDate", saved.getStartDate());
+        newValues.put("ongoing", saved.isOngoing());
+        audit.recordChange(
+                caller.userId(),
+                "CREATE_MEDICATION",
+                "medications",
+                saved.getId(),
+                null,
+                null,
+                newValues);
+
         return ResponseEntity.status(HttpStatus.CREATED).body(MedicationView.of(saved));
     }
 

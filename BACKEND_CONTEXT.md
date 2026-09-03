@@ -5,11 +5,16 @@
 > load-bearing, and — most valuably — the traps that already cost time. Update it at every
 > phase commit.
 
-**Last updated:** 2026-09-03. B8 (Analytics + Caching) complete — **uncommitted**, along with
-B6c's remainder and B7 from earlier in this session.
-**State:** B1–B8 complete.
+**Last updated:** 2026-09-03. B9 (Hardening) substantially complete — **uncommitted**. CSRF,
+rate limiting, security headers, the global error envelope, request-id correlation, and full
+audit-event coverage are all real and tested. Deployment artifacts exist (`Dockerfile`,
+`docker-compose.prod.yml`, `Caddyfile`) but nothing has actually been deployed yet — no Oracle
+Cloud VM or Supabase project exists. The load test and the partitioning decision it's supposed
+to settle are still ahead.
+**State:** B1–B9(hardening half) complete. B9's other half — deploy, load proof — not started.
 **Tests:** 225 in the default suite + 4 `external`, all green.
-**Next:** B9 — hardening, CSRF, deploy, the load test that finally decides partitioning (§13).
+**Next:** walk through Oracle Cloud (Always Free VM) + Supabase account creation with the user,
+deploy for real, then the k6 load test against a locally seeded 50–100M row dataset (§13).
 
 ---
 
@@ -42,10 +47,10 @@ domain spec wins on *what*.
 | B6c | Documents — upload, Tika sniffing, checksum, scan queue, quarantine | done · `278614a` |
 | B6c | Version chain, signed download, first audit writes | done · `853fc59` |
 | B6c | Cloudinary backend, verified live | done · `96ef7ba` |
-| B6c | Orphan sweep (§16.7), real-ClamAV EICAR test | done · uncommitted |
-| B7 | GIS — base map, clustering, k-anonymity aggregates, drill-down | done · uncommitted |
-| B8 | Analytics dashboard, rollup materialized view, Caffeine cache, audit endpoint | done · uncommitted |
-| **B9** | **Hardening, CSRF, deploy** | **not started · next** |
+| B6c | Orphan sweep (§16.7), real-ClamAV EICAR test | done · `f4b9815` |
+| B7 | GIS — base map, clustering, k-anonymity aggregates, drill-down | done · `d7f9bc3` |
+| B8 | Analytics dashboard, rollup materialized view, Caffeine cache, audit endpoint | done · `37f6217` |
+| **B9** | **CSRF, rate limiting, headers, error envelope, request-id, full audit coverage, deployment artifacts** | **hardening done · uncommitted — deploy and load-proof not started** |
 
 ---
 
@@ -571,7 +576,34 @@ failure than V22.4.4-style test camouflage, but still a filter that would have g
 way for every optional audit query. Fixed with an explicit `CAST(? AS text)` per parameter,
 matching its column's real type (`uuid`, `timestamptz`).
 
-## 13 · Standing constraints
+## 13 · B9 — Hardening (deploy and load-proof still ahead)
+
+**What's built**, all in `ctms-common`/`ctms-security`/`ctms-app` unless noted:
+
+| Item | Where | Notes |
+|---|---|---|
+| Request-id correlation | `ctms-common/.../web/RequestIdFilter.java` | `HIGHEST_PRECEDENCE` filter, MDC key `requestId`, echoed as `X-Request-Id` on every response and in every error body |
+| Global error envelope | `ctms-common/.../web/GlobalErrorAdvice.java` | `{"error":{"code","message","requestId"}}` for anything not already handled by a per-controller `@ExceptionHandler` — those are untouched and still fire first |
+| CSRF double-submit | `ctms-security/.../CsrfDoubleSubmitFilter.java`, `AuthCookies.csrf(...)` | Real enforcement on every non-GET request except `/auth/login`. Cookie is deliberately non-`HttpOnly` |
+| Rate limiting | `ctms-security/.../ratelimit/*` (Bucket4j, in-memory) | Tiers from spec §18.10/§9.2: strict on login (IP *and* email), refresh, uploads, GIS drill-down; generous on ordinary reads/writes. `ctms.security.rate-limit.enabled=false` in tests (see trap below) |
+| Security headers | `SecurityConfig.java`'s `.headers(...)` block | HSTS, CSP, X-Frame-Options, Referrer-Policy, Permissions-Policy, nosniff. Duplicated at the edge by `Caddyfile` in production — either layer being bypassed still leaves the other |
+| Audit completeness | every domain module's write endpoints (or their backing `@Transactional` service, where the controller itself isn't transactional — see trap below) | `AuditTrail.recordChange(...)` covers every §19.2 write event with automatic PHI redaction (`Redaction.redact`, new in `ctms-common`) |
+| Keep-alives | `ctms-app/.../ops/*` | A Supabase ping (prevents the 7-day pause) and a configurable dead-man's-switch health ping (no-ops until a monitoring URL exists) |
+| Deployment artifacts | repo root: `Dockerfile`, `docker-compose.prod.yml`, `Caddyfile`, `.env.example` | Backend-only — no Vercel/frontend piece yet (none exists), no Redis (consistent with B8's decision, nothing actually uses one) |
+
+**Three real bugs found while building this, in order of how embarrassing they are:**
+
+1. **I reintroduced the exact B8 self-invocation `@Transactional` bug**, in the same file class of problem, days after documenting it as a trap to watch for. `AuditTrail.record()` (kept for `DocumentController.download()`'s one call site) originally delegated to `this.recordAccess(...)` — a plain Java call that never goes through the Spring proxy, so `recordAccess`'s `@Transactional(REQUIRES_NEW)` silently never fired, and the INSERT ran inside whatever transaction the caller already had open. For a `readOnly = true` caller (the download endpoint), that's "cannot execute INSERT in a read-only transaction." A background agent fixing the CSRF test migration found it by actually running the suite. Fixed by giving `record()` its own `@Transactional(REQUIRES_NEW)` and its own call to the private `insert(...)` helper — no delegation between the two public methods, ever. **The rule, again, because apparently once wasn't enough:** if method B needs its own propagation and is ever reached via `this.B(...)` from method A in the same class, A's transaction wins and B's annotation is silently decorative.
+2. **Spring Boot 4.1.1's `spring-boot-starter-web` no longer auto-registers a classic `com.fasterxml.jackson.databind.ObjectMapper` bean** — Boot 4 defaults to Jackson 3 (`tools.jackson.*`) internally, though Jackson 2 is still on the classpath transitively (springdoc and others still expect it) and compiles fine, it just has no auto-configured bean. `AuditTrail`, `CsrfDoubleSubmitFilter`, and `RateLimitFilter` all construct-inject a Jackson 2 `ObjectMapper` — without a bean, the whole security filter chain fails to build, everywhere, tests included. Fixed with a small compatibility bean (`ctms-common/.../audit/JacksonCompatibilityConfig.java`, via `Jackson2ObjectMapperBuilder`). If a future phase touches JSON handling, know that this app now carries both Jackson major versions side by side on purpose.
+3. **Bucket4j buckets live for the process lifetime with nothing to reset them.** The test suite calls `/auth/login` for real, hundreds of times, from the same JVM — a production-calibrated 5-per-15-minute login budget doesn't survive the second test class. Fixed the same way every other timer in this codebase is handled in tests: a property (`ctms.security.rate-limit.enabled`), defaulted `true`, set `false` in `AbstractPostgresIT`. A dedicated test overrides it back to exercise the real behaviour.
+
+**Explicitly not done, and why that's fine for now:**
+- **No actual deployment.** No Oracle Cloud VM, no Supabase project — the user has neither yet. Artifacts are ready; the account-creation walkthrough is the next conversation, not a code task.
+- **No k6 load proof, no partitioning decision.** Needs a locally seeded 50–100M row dataset (§13.3 of the Spring design doc) — a separate, sizeable undertaking, not something to fold into a hardening pass.
+- **No formal §13.2 "scope harness."** The per-module RLS/authorization tests already built across B4–B8 substantially cover the same ground per-endpoint; a single generic parameterized harness replaying every query as all seven roles was judged a separate, larger investment than this phase's actual ask.
+- `participant_identity:read` has no rate-limit tier wired to an actual endpoint — no controller exposes a raw identity-read route yet (identity is write-only at enrolment, never echoed back). Nothing to limit until that endpoint exists.
+
+## 14 · Standing constraints
 
 - Free tier throughout: Supabase Postgres (500 MB, no replicas, no backups, 7-day pause),
   Oracle Always Free VM (4 ARM cores / 24 GB) for the app + Redis + ClamAV, Vercel for the

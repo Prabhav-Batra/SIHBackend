@@ -1,16 +1,21 @@
 package com.sih26046.ctms.trials;
 
+import com.sih26046.ctms.audit.AuditTrail;
+import com.sih26046.ctms.security.CurrentUser;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.net.URI;
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -36,9 +41,11 @@ import org.springframework.web.server.ResponseStatusException;
 public class TrialStaffController {
 
     private final TrialStaffRepository assignments;
+    private final AuditTrail audit;
 
-    public TrialStaffController(TrialStaffRepository assignments) {
+    public TrialStaffController(TrialStaffRepository assignments, AuditTrail audit) {
         this.assignments = assignments;
+        this.audit = audit;
     }
 
     public record CreateAssignment(
@@ -79,7 +86,9 @@ public class TrialStaffController {
     @PostMapping
     @PreAuthorize("hasAuthority('trial_staff:create')")
     @Transactional
-    public ResponseEntity<AssignmentView> assign(@Valid @RequestBody CreateAssignment request) {
+    public ResponseEntity<AssignmentView> assign(
+            @Valid @RequestBody CreateAssignment request,
+            @AuthenticationPrincipal CurrentUser caller) {
         TrialStaffEntity saved =
                 assignments.saveAndFlush(
                         new TrialStaffEntity(
@@ -88,6 +97,15 @@ public class TrialStaffController {
                                 request.trialSiteId(),
                                 request.userId(),
                                 request.staffRole()));
+
+        audit.recordChange(
+                caller.userId(),
+                "ASSIGN_TRIAL_STAFF",
+                "trial_staff",
+                saved.getId(),
+                saved.getTrialId(),
+                null,
+                buildAssignmentValues(saved));
 
         return ResponseEntity.created(URI.create("/api/v1/trial-staff/" + saved.getId()))
                 .body(AssignmentView.of(saved));
@@ -103,7 +121,8 @@ public class TrialStaffController {
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('trial_staff:delete')")
     @Transactional
-    public ResponseEntity<Void> end(@PathVariable UUID id) {
+    public ResponseEntity<Void> end(
+            @PathVariable UUID id, @AuthenticationPrincipal CurrentUser caller) {
         TrialStaffEntity assignment =
                 assignments
                         .findById(id)
@@ -111,9 +130,31 @@ public class TrialStaffController {
                                 () ->
                                         new ResponseStatusException(
                                                 HttpStatus.NOT_FOUND, "Assignment not found"));
+        Map<String, Object> before = buildAssignmentValues(assignment);
         assignment.end();
-        assignments.save(assignment);
+        TrialStaffEntity saved = assignments.save(assignment);
+
+        audit.recordChange(
+                caller.userId(),
+                "REMOVE_TRIAL_STAFF",
+                "trial_staff",
+                saved.getId(),
+                saved.getTrialId(),
+                before,
+                buildAssignmentValues(saved));
+
         return ResponseEntity.noContent().build();
+    }
+
+    private static Map<String, Object> buildAssignmentValues(TrialStaffEntity a) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("trialId", a.getTrialId());
+        values.put("trialSiteId", a.getTrialSiteId());
+        values.put("userId", a.getUserId());
+        values.put("staffRole", a.getStaffRole());
+        values.put("startDate", a.getStartDate());
+        values.put("endDate", a.getEndDate());
+        return values;
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)

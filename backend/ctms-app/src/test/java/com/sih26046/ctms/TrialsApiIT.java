@@ -52,10 +52,11 @@ class TrialsApiIT extends ApiTestSupport {
                 .formatted("API-" + UUID.randomUUID(), institutionId);
     }
 
-    private MvcResult createTrial(Cookie auth) throws Exception {
+    private MvcResult createTrial(Cookie[] auth) throws Exception {
         return mockMvc.perform(
                         post("/api/v1/trials")
                                 .cookie(auth)
+                                .with(csrf(auth))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(createTrialBody()))
                 .andExpect(status().isCreated())
@@ -72,9 +73,11 @@ class TrialsApiIT extends ApiTestSupport {
 
     @Test
     void researchStaffCannotCreateATrial() throws Exception {
+        Cookie[] staff = loginAs("RESEARCH_STAFF");
         mockMvc.perform(
                         post("/api/v1/trials")
-                                .cookie(loginAs("RESEARCH_STAFF"))
+                                .cookie(staff)
+                                .with(csrf(staff))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(createTrialBody()))
                 .andExpect(status().isForbidden());
@@ -84,7 +87,7 @@ class TrialsApiIT extends ApiTestSupport {
     void theCreatingInvestigatorCanReadTheTrialBack() throws Exception {
         // Creating a trial nobody can then see would be a complete dead end: the read policy
         // resolves through trial_staff, so creation must also record the creator's assignment.
-        Cookie auth = loginAs("PRINCIPAL_INVESTIGATOR");
+        Cookie[] auth = loginAs("PRINCIPAL_INVESTIGATOR");
         String id = read(createTrial(auth), "$.id");
 
         mockMvc.perform(get("/api/v1/trials/" + id).cookie(auth))
@@ -105,12 +108,13 @@ class TrialsApiIT extends ApiTestSupport {
 
     @Test
     void updatingRequiresIfMatch() throws Exception {
-        Cookie auth = loginAs("PRINCIPAL_INVESTIGATOR");
+        Cookie[] auth = loginAs("PRINCIPAL_INVESTIGATOR");
         String id = read(createTrial(auth), "$.id");
 
         mockMvc.perform(
                         patch("/api/v1/trials/" + id)
                                 .cookie(auth)
+                                .with(csrf(auth))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"title\":\"Renamed\"}"))
                 .andExpect(status().isPreconditionRequired());
@@ -118,7 +122,7 @@ class TrialsApiIT extends ApiTestSupport {
 
     @Test
     void updatingWithTheCurrentVersionSucceedsAndAdvancesIt() throws Exception {
-        Cookie auth = loginAs("PRINCIPAL_INVESTIGATOR");
+        Cookie[] auth = loginAs("PRINCIPAL_INVESTIGATOR");
         MvcResult created = createTrial(auth);
         String id = read(created, "$.id");
         String etag = created.getResponse().getHeader(HttpHeaders.ETAG);
@@ -127,6 +131,7 @@ class TrialsApiIT extends ApiTestSupport {
                 mockMvc.perform(
                                 patch("/api/v1/trials/" + id)
                                         .cookie(auth)
+                                        .with(csrf(auth))
                                         .header(HttpHeaders.IF_MATCH, etag)
                                         .contentType(MediaType.APPLICATION_JSON)
                                         .content("{\"title\":\"Renamed\"}"))
@@ -141,7 +146,7 @@ class TrialsApiIT extends ApiTestSupport {
     void aStaleVersionIsRejectedRatherThanOverwriting() throws Exception {
         // §14.4 — last-write-wins silently discards a colleague's edit. Two coordinators
         // editing the same trial is routine, so the second must be told, not ignored.
-        Cookie auth = loginAs("PRINCIPAL_INVESTIGATOR");
+        Cookie[] auth = loginAs("PRINCIPAL_INVESTIGATOR");
         MvcResult created = createTrial(auth);
         String id = read(created, "$.id");
         String staleEtag = created.getResponse().getHeader(HttpHeaders.ETAG);
@@ -149,6 +154,7 @@ class TrialsApiIT extends ApiTestSupport {
         mockMvc.perform(
                         patch("/api/v1/trials/" + id)
                                 .cookie(auth)
+                                .with(csrf(auth))
                                 .header(HttpHeaders.IF_MATCH, staleEtag)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"title\":\"First writer\"}"))
@@ -157,6 +163,7 @@ class TrialsApiIT extends ApiTestSupport {
         mockMvc.perform(
                         patch("/api/v1/trials/" + id)
                                 .cookie(auth)
+                                .with(csrf(auth))
                                 .header(HttpHeaders.IF_MATCH, staleEtag)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"title\":\"Second writer\"}"))
@@ -165,7 +172,7 @@ class TrialsApiIT extends ApiTestSupport {
 
     @Test
     void aTrialCannotBeActivatedWithoutEthicsApproval() throws Exception {
-        Cookie auth = loginAs("PRINCIPAL_INVESTIGATOR");
+        Cookie[] auth = loginAs("PRINCIPAL_INVESTIGATOR");
         MvcResult created = createTrial(auth);
         String id = read(created, "$.id");
         String etag = created.getResponse().getHeader(HttpHeaders.ETAG);
@@ -173,6 +180,7 @@ class TrialsApiIT extends ApiTestSupport {
         mockMvc.perform(
                         post("/api/v1/trials/" + id + "/status")
                                 .cookie(auth)
+                                .with(csrf(auth))
                                 .header(HttpHeaders.IF_MATCH, etag)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"status\":\"ACTIVE\"}"))
@@ -181,7 +189,7 @@ class TrialsApiIT extends ApiTestSupport {
 
     @Test
     void aTrialAdvancesThroughTheApprovalPath() throws Exception {
-        Cookie auth = loginAs("PRINCIPAL_INVESTIGATOR");
+        Cookie[] auth = loginAs("PRINCIPAL_INVESTIGATOR");
         MvcResult created = createTrial(auth);
         String id = read(created, "$.id");
         String etag = created.getResponse().getHeader(HttpHeaders.ETAG);
@@ -190,6 +198,7 @@ class TrialsApiIT extends ApiTestSupport {
                 mockMvc.perform(
                                 post("/api/v1/trials/" + id + "/status")
                                         .cookie(auth)
+                                        .with(csrf(auth))
                                         .header(HttpHeaders.IF_MATCH, etag)
                                         .contentType(MediaType.APPLICATION_JSON)
                                         .content("{\"status\":\"PENDING_ETHICS\"}"))

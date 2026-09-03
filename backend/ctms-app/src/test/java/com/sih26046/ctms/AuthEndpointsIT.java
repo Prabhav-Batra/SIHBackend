@@ -67,6 +67,16 @@ class AuthEndpointsIT extends AbstractPostgresIT {
                 .orElseThrow(() -> new AssertionError("no cookie named " + name));
     }
 
+    /**
+     * This class predates CSRF and drives {@code /auth/*} directly rather than through {@code
+     * ApiTestSupport.loginAs}, so it needs its own double-submit pair (§18.12): every
+     * state-changing call past login must carry both the {@code csrf_token} cookie login just
+     * set and a matching {@code X-CSRF-Token} header.
+     */
+    private Cookie csrfCookie(MvcResult loginResult) {
+        return named(loginResult, "csrf_token");
+    }
+
     @Test
     void loginSetsBothCookies() throws Exception {
         MvcResult result = login(createUser("RESEARCH_STAFF"), PASSWORD);
@@ -143,9 +153,13 @@ class AuthEndpointsIT extends AbstractPostgresIT {
     void refreshRotatesBothCookies() throws Exception {
         MvcResult loggedIn = login(createUser("RESEARCH_STAFF"), PASSWORD);
         Cookie refresh = named(loggedIn, "refresh_token");
+        Cookie csrf = csrfCookie(loggedIn);
 
         MvcResult refreshed =
-                mockMvc.perform(post("/api/v1/auth/refresh").cookie(refresh))
+                mockMvc.perform(
+                                post("/api/v1/auth/refresh")
+                                        .cookie(refresh, csrf)
+                                        .header("X-CSRF-Token", csrf.getValue()))
                         .andExpect(status().isOk())
                         .andReturn();
 
@@ -158,10 +172,18 @@ class AuthEndpointsIT extends AbstractPostgresIT {
     void replayingARefreshTokenIsRejected() throws Exception {
         MvcResult loggedIn = login(createUser("RESEARCH_STAFF"), PASSWORD);
         Cookie refresh = named(loggedIn, "refresh_token");
+        Cookie csrf = csrfCookie(loggedIn);
 
-        mockMvc.perform(post("/api/v1/auth/refresh").cookie(refresh)).andExpect(status().isOk());
+        mockMvc.perform(
+                        post("/api/v1/auth/refresh")
+                                .cookie(refresh, csrf)
+                                .header("X-CSRF-Token", csrf.getValue()))
+                .andExpect(status().isOk());
 
-        mockMvc.perform(post("/api/v1/auth/refresh").cookie(refresh))
+        mockMvc.perform(
+                        post("/api/v1/auth/refresh")
+                                .cookie(refresh, csrf)
+                                .header("X-CSRF-Token", csrf.getValue()))
                 .andExpect(status().isUnauthorized());
     }
 
@@ -169,8 +191,12 @@ class AuthEndpointsIT extends AbstractPostgresIT {
     void logoutRevokesTheSession() throws Exception {
         MvcResult loggedIn = login(createUser("RESEARCH_STAFF"), PASSWORD);
         Cookie access = named(loggedIn, "access_token");
+        Cookie csrf = csrfCookie(loggedIn);
 
-        mockMvc.perform(post("/api/v1/auth/logout").cookie(access))
+        mockMvc.perform(
+                        post("/api/v1/auth/logout")
+                                .cookie(access, csrf)
+                                .header("X-CSRF-Token", csrf.getValue()))
                 .andExpect(status().isNoContent());
 
         // The access token is still cryptographically valid, but its session is revoked —

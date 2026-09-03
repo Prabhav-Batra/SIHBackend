@@ -1,5 +1,6 @@
 package com.sih26046.ctms.ethics;
 
+import com.sih26046.ctms.audit.AuditTrail;
 import com.sih26046.ctms.security.CurrentUser;
 import java.sql.SQLException;
 import jakarta.validation.Valid;
@@ -8,6 +9,7 @@ import jakarta.validation.constraints.NotNull;
 import java.net.URI;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -54,12 +56,15 @@ public class ComplianceController {
 
     private final ComplianceRequirementRepository requirements;
     private final TrialComplianceRepository trialCompliance;
+    private final AuditTrail audit;
 
     public ComplianceController(
             ComplianceRequirementRepository requirements,
-            TrialComplianceRepository trialCompliance) {
+            TrialComplianceRepository trialCompliance,
+            AuditTrail audit) {
         this.requirements = requirements;
         this.trialCompliance = trialCompliance;
+        this.audit = audit;
     }
 
     // ── the catalogue ────────────────────────────────────────────────────────
@@ -129,7 +134,9 @@ public class ComplianceController {
     @PostMapping("/requirements")
     @PreAuthorize("hasAuthority('compliance:define')")
     @Transactional
-    public ResponseEntity<RequirementView> define(@Valid @RequestBody DefineRequirement request) {
+    public ResponseEntity<RequirementView> define(
+            @Valid @RequestBody DefineRequirement request,
+            @AuthenticationPrincipal CurrentUser caller) {
         ComplianceRequirementEntity saved =
                 requirements.saveAndFlush(
                         new ComplianceRequirementEntity(
@@ -144,6 +151,24 @@ public class ComplianceController {
                                         : request.appliesToPhase().toArray(String[]::new),
                                 request.isMandatory() == null || request.isMandatory(),
                                 request.evidenceRequired() == null || request.evidenceRequired()));
+
+        // Trial-agnostic reference data (§8.21) — no trialId to denormalise onto the row.
+        Map<String, Object> newValues = new LinkedHashMap<>();
+        newValues.put("code", saved.getCode());
+        newValues.put("title", saved.getTitle());
+        newValues.put("category", saved.getCategory());
+        newValues.put("authority", saved.getAuthority());
+        newValues.put("isMandatory", saved.isMandatory());
+        newValues.put("evidenceRequired", saved.isEvidenceRequired());
+        newValues.put("status", saved.getStatus());
+        audit.recordChange(
+                caller.userId(),
+                "DEFINE_REQUIREMENT",
+                "compliance_requirements",
+                saved.getId(),
+                null,
+                null,
+                newValues);
 
         return ResponseEntity.created(URI.create("/api/v1/compliance/requirements/" + saved.getId()))
                 .body(RequirementView.of(saved));
@@ -282,10 +307,21 @@ public class ComplianceController {
         if (!etagOf(found).equals(ifMatch.trim())) {
             throw new OptimisticLockingFailureException("Compliance record " + id + " has changed");
         }
+        Map<String, Object> before = valuesOf(found);
 
         found.assess(
                 request.status(), caller.userId(), request.evidenceDocumentId(), request.notes());
         TrialComplianceEntity saved = trialCompliance.saveAndFlush(found);
+
+        audit.recordChange(
+                caller.userId(),
+                "VERIFY_COMPLIANCE",
+                "trial_compliance",
+                saved.getId(),
+                trialId,
+                before,
+                valuesOf(saved));
+
         return withEtag(saved).body(TrialComplianceView.of(saved));
     }
 
@@ -302,6 +338,17 @@ public class ComplianceController {
 
     private static ResponseEntity.BodyBuilder withEtag(TrialComplianceEntity t) {
         return ResponseEntity.ok().eTag(etagOf(t));
+    }
+
+    private static Map<String, Object> valuesOf(TrialComplianceEntity t) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("trialId", t.getTrialId());
+        values.put("complianceRequirementId", t.getComplianceRequirementId());
+        values.put("status", t.getStatus());
+        values.put("evidenceDocumentId", t.getEvidenceDocumentId());
+        values.put("dueDate", t.getDueDate());
+        values.put("completedDate", t.getCompletedDate());
+        return values;
     }
 
     @ExceptionHandler(OptimisticLockingFailureException.class)

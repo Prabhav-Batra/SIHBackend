@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew :ctms-app:bootRun)",
+      "Bash(curl -s http://localhost:8080/actuator/health/readiness)",
+      "Bash(docker exec *)",
+      "Bash(curl -v http://localhost:8080/actuator/health/readiness)",
+      "Bash(pkill -9 java)",
+      "Bash(pkill -9 gradle)",
+      "Bash(export CTMS_JWT_SECRET=\"this-is-a-32-byte-secret-string!\")",
+      "Bash(./gradlew :ctms-app:test --rerun-tasks)",
+      "Bash(bash /private/tmp/claude-501/-Users-prabhavbatra-Documents-Programming-SIH26046/8a243e96-5878-4ec3-bd1d-5c7624579b29/scratchpad/comprehensive_test.sh)"
+    ]
+  }
+}

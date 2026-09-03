@@ -1,13 +1,17 @@
 package com.sih26046.ctms.ethics;
 
+import com.sih26046.ctms.audit.AuditTrail;
 import com.sih26046.ctms.security.CurrentUser;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.net.URI;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -44,11 +48,15 @@ public class EthicsController {
 
     private final EthicsSubmissionRepository submissions;
     private final EthicsReviewRepository reviews;
+    private final AuditTrail audit;
 
     public EthicsController(
-            EthicsSubmissionRepository submissions, EthicsReviewRepository reviews) {
+            EthicsSubmissionRepository submissions,
+            EthicsReviewRepository reviews,
+            AuditTrail audit) {
         this.submissions = submissions;
         this.reviews = reviews;
+        this.audit = audit;
     }
 
     // ── views ────────────────────────────────────────────────────────────────
@@ -96,11 +104,16 @@ public class EthicsController {
         }
     }
 
+    // @Schema(name=...) only disambiguates the OpenAPI schema registry key: SafetyController
+    // declares its own unrelated CreateReview/ReviewView, and springdoc keys schemas by simple
+    // class name, so without this the two would silently overwrite each other in the API docs.
+    @Schema(name = "EthicsCreateReview")
     public record CreateReview(
             @NotNull UUID ethicsSubmissionId,
             @NotBlank String recommendation,
             @NotBlank String comments) {}
 
+    @Schema(name = "EthicsReviewView")
     public record ReviewView(
             UUID id,
             UUID ethicsSubmissionId,
@@ -180,6 +193,15 @@ public class EthicsController {
                                 request.protocolDocumentId(),
                                 caller.userId()));
 
+        audit.recordChange(
+                caller.userId(),
+                "SUBMIT_ETHICS",
+                "ethics_submissions",
+                saved.getId(),
+                saved.getTrialId(),
+                null,
+                valuesOf(saved));
+
         return ResponseEntity.created(URI.create("/api/v1/ethics/submissions/" + saved.getId()))
                 .eTag(etagOf(saved))
                 .body(SubmissionView.of(saved));
@@ -198,7 +220,8 @@ public class EthicsController {
     public ResponseEntity<SubmissionView> decide(
             @PathVariable UUID id,
             @RequestHeader(name = HttpHeaders.IF_MATCH, required = false) String ifMatch,
-            @Valid @RequestBody Decide request) {
+            @Valid @RequestBody Decide request,
+            @AuthenticationPrincipal CurrentUser caller) {
 
         if (!EthicsDecision.isDecision(request.status())) {
             throw new ResponseStatusException(
@@ -206,9 +229,36 @@ public class EthicsController {
         }
 
         EthicsSubmissionEntity submission = loadForWrite(id, ifMatch);
+        Map<String, Object> before = valuesOf(submission);
         submission.decide(request.status(), request.conditions(), request.approvalValidUntil());
         EthicsSubmissionEntity saved = submissions.saveAndFlush(submission);
+
+        audit.recordChange(
+                caller.userId(),
+                decisionAction(saved.getStatus()),
+                "ethics_submissions",
+                saved.getId(),
+                saved.getTrialId(),
+                before,
+                valuesOf(saved));
+
         return withEtag(saved).body(SubmissionView.of(saved));
+    }
+
+    /**
+     * §19.2 has no dedicated action for a DEFERRED decision — {@code APPROVE_ETHICS} and
+     * {@code REJECT_ETHICS} are the catalogue's only decision-shaped events. Falling back to
+     * {@code REVIEW_ETHICS} keeps the event within the catalogue rather than inventing one.
+     */
+    private static String decisionAction(String status) {
+        if (EthicsDecision.APPROVED.equals(status)
+                || EthicsDecision.APPROVED_WITH_CONDITIONS.equals(status)) {
+            return "APPROVE_ETHICS";
+        }
+        if (EthicsDecision.REJECTED.equals(status)) {
+            return "REJECT_ETHICS";
+        }
+        return "REVIEW_ETHICS";
     }
 
     /**
@@ -223,12 +273,37 @@ public class EthicsController {
     @Transactional
     public ResponseEntity<SubmissionView> withdraw(
             @PathVariable UUID id,
-            @RequestHeader(name = HttpHeaders.IF_MATCH, required = false) String ifMatch) {
+            @RequestHeader(name = HttpHeaders.IF_MATCH, required = false) String ifMatch,
+            @AuthenticationPrincipal CurrentUser caller) {
 
         EthicsSubmissionEntity submission = loadForWrite(id, ifMatch);
+        Map<String, Object> before = valuesOf(submission);
         submission.withdraw();
         EthicsSubmissionEntity saved = submissions.saveAndFlush(submission);
+
+        audit.recordChange(
+                caller.userId(),
+                "WITHDRAW_ETHICS_SUBMISSION",
+                "ethics_submissions",
+                saved.getId(),
+                saved.getTrialId(),
+                before,
+                valuesOf(saved));
+
         return withEtag(saved).body(SubmissionView.of(saved));
+    }
+
+    private static Map<String, Object> valuesOf(EthicsSubmissionEntity s) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("trialId", s.getTrialId());
+        values.put("institutionId", s.getInstitutionId());
+        values.put("submissionNumber", s.getSubmissionNumber());
+        values.put("submissionType", s.getSubmissionType());
+        values.put("status", s.getStatus());
+        values.put("decisionDate", s.getDecisionDate());
+        values.put("approvalValidUntil", s.getApprovalValidUntil());
+        values.put("conditions", s.getConditions());
+        return values;
     }
 
     // ── reviews ──────────────────────────────────────────────────────────────
@@ -276,6 +351,21 @@ public class EthicsController {
             submission.markUnderReview();
             submissions.save(submission);
         }
+
+        // comments is deliberation narrative — Redaction masks it by field name (§19.5); the
+        // real value is passed through here rather than pre-redacted.
+        Map<String, Object> newValues = new LinkedHashMap<>();
+        newValues.put("ethicsSubmissionId", saved.getEthicsSubmissionId());
+        newValues.put("recommendation", saved.getRecommendation());
+        newValues.put("comments", saved.getComments());
+        audit.recordChange(
+                caller.userId(),
+                "REVIEW_ETHICS",
+                "ethics_reviews",
+                saved.getId(),
+                submission.getTrialId(),
+                null,
+                newValues);
 
         return ResponseEntity.status(HttpStatus.CREATED).body(ReviewView.of(saved));
     }

@@ -17,6 +17,10 @@ dependencies {
 
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-actuator")
+    // Local-testing convenience: a browsable, clickable API explorer generated from the
+    // existing @RestController annotations, so manual testing doesn't require hand-rolling a
+    // Postman collection. Not part of the platform's own spec.
+    implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.5")
     // The composition root hosts the Spring Security filter chain, so the
     // security types are part of its own compile classpath, not just ctms-security's.
     implementation("org.springframework.boot:spring-boot-starter-security")
