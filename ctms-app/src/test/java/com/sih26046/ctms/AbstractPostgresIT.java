@@ -65,6 +65,21 @@ public abstract class AbstractPostgresIT {
         // wrote, and a timer refreshing mid-assertion would be a second, uncontrolled refresh.
         registry.add("ctms.analytics.rollup-refresh-scheduled", () -> "false");
 
+        // Neither keep-alive job (§4/B9) should fire mid-suite — one pings Supabase, which
+        // does not exist in a Testcontainers run, and the other pings an external monitor that
+        // is never configured in tests anyway (empty ctms.ops.health-ping-url is already a
+        // no-op, but there is no reason to let the scheduler even try).
+        registry.add("ctms.ops.supabase-ping-scheduled", () -> "false");
+        registry.add("ctms.ops.health-ping-scheduled", () -> "false");
+
+        // Bucket4j buckets live for the process lifetime with nothing to reset them (§18.10).
+        // Hundreds of test methods logging in through the real /auth/login endpoint would
+        // exhaust a 5-per-15-minute production budget within the first few test classes — the
+        // same category of problem the schedulers above solve, for the same reason: test
+        // volume is not the thing §18.10 is calibrated against. RateLimitIT overrides this back
+        // to true to test the real behaviour.
+        registry.add("ctms.security.rate-limit.enabled", () -> "false");
+
         /* A test-only signing key. Production has no default and fails fast without one. */
         registry.add(
                 "ctms.auth.jwt-secret", () -> "integration-test-signing-key-at-least-32-bytes");

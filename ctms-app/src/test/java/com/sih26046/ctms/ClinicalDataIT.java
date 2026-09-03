@@ -29,7 +29,7 @@ class ClinicalDataIT extends ApiTestSupport {
     private static UUID institutionId;
     private static boolean seeded;
 
-    private Cookie investigator;
+    private Cookie[] investigator;
     private String trialId;
     private String siteId;
     private String participantId;
@@ -58,6 +58,7 @@ class ClinicalDataIT extends ApiTestSupport {
                         mockMvc.perform(
                                         post("/api/v1/trials")
                                                 .cookie(investigator)
+                                                .with(csrf(investigator))
                                                 .contentType(MediaType.APPLICATION_JSON)
                                                 .content(
                                                         """
@@ -76,6 +77,7 @@ class ClinicalDataIT extends ApiTestSupport {
                         mockMvc.perform(
                                         post("/api/v1/sites")
                                                 .cookie(investigator)
+                                                .with(csrf(investigator))
                                                 .contentType(MediaType.APPLICATION_JSON)
                                                 .content(
                                                         """
@@ -102,6 +104,7 @@ class ClinicalDataIT extends ApiTestSupport {
             mockMvc.perform(
                             post("/api/v1/trials/" + trialId + "/status")
                                     .cookie(investigator)
+                                    .with(csrf(investigator))
                                     .header("If-Match", etag)
                                     .contentType(MediaType.APPLICATION_JSON)
                                     .content("{\"status\":\"%s\"}".formatted(next)))
@@ -113,6 +116,7 @@ class ClinicalDataIT extends ApiTestSupport {
                         mockMvc.perform(
                                         post("/api/v1/participants")
                                                 .cookie(investigator)
+                                                .with(csrf(investigator))
                                                 .contentType(MediaType.APPLICATION_JSON)
                                                 .content(
                                                         """
@@ -139,6 +143,7 @@ class ClinicalDataIT extends ApiTestSupport {
         return mockMvc.perform(
                         post("/api/v1/visits")
                                 .cookie(investigator)
+                                .with(csrf(investigator))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         """
@@ -154,6 +159,7 @@ class ClinicalDataIT extends ApiTestSupport {
         return mockMvc.perform(
                         post("/api/v1/observations")
                                 .cookie(investigator)
+                                .with(csrf(investigator))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         """
@@ -209,6 +215,7 @@ class ClinicalDataIT extends ApiTestSupport {
         mockMvc.perform(
                         post("/api/v1/participants/" + participantId + "/withdrawal")
                                 .cookie(investigator)
+                                .with(csrf(investigator))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"reason\":\"Participant request\"}"))
                 .andExpect(status().isOk())
@@ -228,6 +235,7 @@ class ClinicalDataIT extends ApiTestSupport {
         mockMvc.perform(
                         post("/api/v1/participants/" + participantId + "/withdrawal")
                                 .cookie(investigator)
+                                .with(csrf(investigator))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"reason\":\"Participant request\"}"))
                 .andExpect(status().isOk());
@@ -251,6 +259,7 @@ class ClinicalDataIT extends ApiTestSupport {
         mockMvc.perform(
                         post("/api/v1/consents/" + consentId + "/withdrawal")
                                 .cookie(investigator)
+                                .with(csrf(investigator))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"reason\":\"Consent withdrawn\"}"))
                 .andExpect(status().isOk());
@@ -266,6 +275,7 @@ class ClinicalDataIT extends ApiTestSupport {
                 mockMvc.perform(
                                 post("/api/v1/medications")
                                         .cookie(investigator)
+                                        .with(csrf(investigator))
                                         .contentType(MediaType.APPLICATION_JSON)
                                         .content(
                                                 """
@@ -288,6 +298,7 @@ class ClinicalDataIT extends ApiTestSupport {
                         mockMvc.perform(
                                         post("/api/v1/medications")
                                                 .cookie(investigator)
+                                                .with(csrf(investigator))
                                                 .contentType(MediaType.APPLICATION_JSON)
                                                 .content(
                                                         """

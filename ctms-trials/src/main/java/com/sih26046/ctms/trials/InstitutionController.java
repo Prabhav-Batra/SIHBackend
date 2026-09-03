@@ -1,11 +1,15 @@
 package com.sih26046.ctms.trials;
 
+import com.sih26046.ctms.audit.AuditTrail;
+import com.sih26046.ctms.security.CurrentUser;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -14,6 +18,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -33,9 +38,11 @@ import org.springframework.web.server.ResponseStatusException;
 public class InstitutionController {
 
     private final InstitutionRepository institutions;
+    private final AuditTrail audit;
 
-    public InstitutionController(InstitutionRepository institutions) {
+    public InstitutionController(InstitutionRepository institutions, AuditTrail audit) {
         this.institutions = institutions;
+        this.audit = audit;
     }
 
     public record CreateInstitution(
@@ -100,7 +107,9 @@ public class InstitutionController {
     @PostMapping
     @PreAuthorize("hasAuthority('institution:create')")
     @Transactional
-    public ResponseEntity<InstitutionView> create(@Valid @RequestBody CreateInstitution request) {
+    public ResponseEntity<InstitutionView> create(
+            @Valid @RequestBody CreateInstitution request,
+            @AuthenticationPrincipal CurrentUser caller) {
         InstitutionEntity saved =
                 institutions.saveAndFlush(
                         new InstitutionEntity(
@@ -111,6 +120,15 @@ public class InstitutionController {
                                 request.state(),
                                 request.latitude(),
                                 request.longitude()));
+
+        audit.recordChange(
+                caller.userId(),
+                "CREATE_INSTITUTION",
+                "institutions",
+                saved.getId(),
+                null,
+                null,
+                valuesOf(saved));
 
         return ResponseEntity.created(URI.create("/api/v1/institutions/" + saved.getId()))
                 .eTag(etagOf(saved))
@@ -123,10 +141,12 @@ public class InstitutionController {
     public ResponseEntity<InstitutionView> update(
             @PathVariable UUID id,
             @RequestHeader(name = HttpHeaders.IF_MATCH, required = false) String ifMatch,
-            @Valid @RequestBody UpdateInstitution request) {
+            @Valid @RequestBody UpdateInstitution request,
+            @AuthenticationPrincipal CurrentUser caller) {
 
         InstitutionEntity found = institutions.findById(id).orElseThrow(this::notFound);
         requireCurrentVersion(found, ifMatch);
+        Map<String, Object> before = valuesOf(found);
 
         found.amend(
                 request.name(),
@@ -139,10 +159,25 @@ public class InstitutionController {
         }
 
         InstitutionEntity saved = institutions.saveAndFlush(found);
+        audit.recordChange(
+                caller.userId(), "UPDATE_INSTITUTION", "institutions", saved.getId(), null, before,
+                valuesOf(saved));
         return ResponseEntity.ok().eTag(etagOf(saved)).body(InstitutionView.of(saved));
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    private static Map<String, Object> valuesOf(InstitutionEntity i) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("name", i.getName());
+        values.put("institutionType", i.getInstitutionType());
+        values.put("city", i.getCity());
+        values.put("state", i.getState());
+        values.put("latitude", i.getLatitude());
+        values.put("longitude", i.getLongitude());
+        values.put("status", i.getStatus());
+        return values;
+    }
 
     private void requireCurrentVersion(InstitutionEntity found, String ifMatch) {
         if (ifMatch == null || ifMatch.isBlank()) {

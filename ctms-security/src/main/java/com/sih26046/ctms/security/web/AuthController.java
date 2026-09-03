@@ -11,7 +11,12 @@ import com.sih26046.ctms.security.RefreshTokenReuseException;
 import com.sih26046.ctms.security.RefreshTokenService;
 import com.sih26046.ctms.security.SessionRevocationReason;
 import com.sih26046.ctms.security.TokenIssuanceService;
+import com.sih26046.ctms.security.ratelimit.RateLimitTier;
+import com.sih26046.ctms.security.ratelimit.RateLimiter;
+import com.sih26046.ctms.web.ErrorResponse;
 import jakarta.validation.Valid;
+import java.security.SecureRandom;
+import java.util.Base64;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -33,21 +38,33 @@ public class AuthController {
     private final TokenIssuanceService tokenIssuance;
     private final RefreshTokenService refreshTokens;
     private final AuthProperties properties;
+    private final RateLimiter rateLimiter;
 
     public AuthController(
             AuthenticationService authentication,
             TokenIssuanceService tokenIssuance,
             RefreshTokenService refreshTokens,
-            AuthProperties properties) {
+            AuthProperties properties,
+            RateLimiter rateLimiter) {
         this.authentication = authentication;
         this.tokenIssuance = tokenIssuance;
         this.refreshTokens = refreshTokens;
         this.properties = properties;
+        this.rateLimiter = rateLimiter;
     }
 
     @PostMapping("/login")
-    public ResponseEntity<AuthDtos.LoginResponse> login(
-            @Valid @RequestBody AuthDtos.LoginRequest request) {
+    public ResponseEntity<?> login(@Valid @RequestBody AuthDtos.LoginRequest request) {
+
+        // §18.10: per IP (RateLimitFilter, keyed on the request before this method runs) *and*
+        // per email — a distributed attempt spread across addresses still hits the same account,
+        // and that half can only be checked here, once the body is a parsed field rather than a
+        // stream a filter would have to buffer and replay for the controller.
+        if (!rateLimiter.tryConsume("email:" + request.email().toLowerCase(), RateLimitTier.LOGIN)) {
+            return ResponseEntity.status(429)
+                    .header("Retry-After", "900")
+                    .body(ErrorResponse.of("RATE_LIMITED", "Too many attempts for this account"));
+        }
 
         AuthenticatedPrincipal principal =
                 authentication.authenticate(request.email(), request.password());
@@ -57,6 +74,7 @@ public class AuthController {
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, accessCookie(tokens.accessToken()))
                 .header(HttpHeaders.SET_COOKIE, refreshCookie(tokens.refreshToken()))
+                .header(HttpHeaders.SET_COOKIE, csrfCookie())
                 .body(
                         new AuthDtos.LoginResponse(
                                 principal.userId(),
@@ -78,6 +96,7 @@ public class AuthController {
         return ResponseEntity.ok()
                 .header(HttpHeaders.SET_COOKIE, accessCookie(tokens.accessToken()))
                 .header(HttpHeaders.SET_COOKIE, refreshCookie(tokens.refreshToken()))
+                .header(HttpHeaders.SET_COOKIE, csrfCookie())
                 .build();
     }
 
@@ -89,6 +108,7 @@ public class AuthController {
         return ResponseEntity.noContent()
                 .header(HttpHeaders.SET_COOKIE, AuthCookies.clearAccess().toString())
                 .header(HttpHeaders.SET_COOKIE, AuthCookies.clearRefresh().toString())
+                .header(HttpHeaders.SET_COOKIE, AuthCookies.clearCsrf().toString())
                 .build();
     }
 
@@ -133,4 +153,17 @@ public class AuthController {
         return AuthCookies.refresh(token, properties.refreshTokenTtl()).toString();
     }
 
+    /**
+     * A fresh double-submit token on every login and every refresh (§18.12). It rides the
+     * access token's lifetime — reissued together, expired together — rather than the
+     * refresh token's, since it authorises the same state-changing calls the access cookie does.
+     */
+    private String csrfCookie() {
+        byte[] bytes = new byte[32];
+        CSRF_RANDOM.nextBytes(bytes);
+        String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        return AuthCookies.csrf(token, properties.accessTokenTtl()).toString();
+    }
+
+    private static final SecureRandom CSRF_RANDOM = new SecureRandom();
 }

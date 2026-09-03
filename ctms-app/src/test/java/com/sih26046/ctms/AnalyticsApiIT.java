@@ -30,7 +30,7 @@ class AnalyticsApiIT extends ApiTestSupport {
 
     @Autowired private TrialRollupRefresher refresher;
 
-    private Cookie investigator;
+    private Cookie[] investigator;
     private String trialId;
 
     @BeforeEach
@@ -50,6 +50,7 @@ class AnalyticsApiIT extends ApiTestSupport {
                         mockMvc.perform(
                                         post("/api/v1/trials")
                                                 .cookie(investigator)
+                                                .with(csrf(investigator))
                                                 .contentType(MediaType.APPLICATION_JSON)
                                                 .content(
                                                         """
@@ -78,6 +79,7 @@ class AnalyticsApiIT extends ApiTestSupport {
         mockMvc.perform(
                         post("/api/v1/trials/" + trialId + "/status")
                                 .cookie(investigator)
+                                .with(csrf(investigator))
                                 .header("If-Match", etag)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"status\":\"%s\"}".formatted(status)))
@@ -96,10 +98,11 @@ class AnalyticsApiIT extends ApiTestSupport {
     @Test
     void investigatorSeesOnlyTheirOwnTrialInTheRollupNotEveryTrialNationally() throws Exception {
         // A second, unrelated trial, refreshed into the same materialized view.
-        Cookie otherInvestigator = loginAs("PRINCIPAL_INVESTIGATOR");
+        Cookie[] otherInvestigator = loginAs("PRINCIPAL_INVESTIGATOR");
         mockMvc.perform(
                         post("/api/v1/trials")
                                 .cookie(otherInvestigator)
+                                .with(csrf(otherInvestigator))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         """
@@ -134,6 +137,7 @@ class AnalyticsApiIT extends ApiTestSupport {
                         mockMvc.perform(
                                         post("/api/v1/participants")
                                                 .cookie(investigator)
+                                                .with(csrf(investigator))
                                                 .contentType(MediaType.APPLICATION_JSON)
                                                 .content(
                                                         """
@@ -153,6 +157,7 @@ class AnalyticsApiIT extends ApiTestSupport {
         mockMvc.perform(
                         post("/api/v1/adverse-events")
                                 .cookie(investigator)
+                                .with(csrf(investigator))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         """
@@ -188,6 +193,7 @@ class AnalyticsApiIT extends ApiTestSupport {
                 mockMvc.perform(
                                 post("/api/v1/sites")
                                         .cookie(investigator)
+                                        .with(csrf(investigator))
                                         .contentType(MediaType.APPLICATION_JSON)
                                         .content(
                                                 """

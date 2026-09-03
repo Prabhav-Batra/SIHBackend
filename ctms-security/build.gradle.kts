@@ -6,6 +6,7 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter")
     implementation("org.springframework.boot:spring-boot-starter-web")
     implementation("org.springframework.boot:spring-boot-starter-security")
+    implementation("com.fasterxml.jackson.core:jackson-databind")
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-validation")
 
@@ -20,4 +21,8 @@ dependencies {
 
     // Enforces §6.1 mechanically: no role name may appear in an authorization expression.
     testImplementation("com.tngtech.archunit:archunit-junit5:1.5.0")
+
+    // Rate limiting (§9.2, §18.10) — in-memory at one instance, since a Redis-backed bucket
+    // would spend a network round trip per request to reach the identical answer here.
+    implementation("com.bucket4j:bucket4j_jdk17-core:8.14.0")
 }

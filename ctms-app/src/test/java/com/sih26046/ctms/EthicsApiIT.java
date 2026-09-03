@@ -40,7 +40,7 @@ class EthicsApiIT extends ApiTestSupport {
     private static UUID hostInstitution;
     private static UUID otherInstitution;
 
-    private Cookie investigator;
+    private Cookie[] investigator;
     private String trialId;
 
     @BeforeEach
@@ -69,6 +69,7 @@ class EthicsApiIT extends ApiTestSupport {
                         mockMvc.perform(
                                         post("/api/v1/trials")
                                                 .cookie(investigator)
+                                                .with(csrf(investigator))
                                                 .contentType(MediaType.APPLICATION_JSON)
                                                 .content(
                                                         """
@@ -90,6 +91,7 @@ class EthicsApiIT extends ApiTestSupport {
         mockMvc.perform(
                         post("/api/v1/trials/" + trialId + "/status")
                                 .cookie(investigator)
+                                .with(csrf(investigator))
                                 .header(HttpHeaders.IF_MATCH, etag)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"status\":\"PENDING_ETHICS\"}"))
@@ -101,6 +103,7 @@ class EthicsApiIT extends ApiTestSupport {
                 mockMvc.perform(
                                 post("/api/v1/ethics/submissions")
                                         .cookie(investigator)
+                                        .with(csrf(investigator))
                                         .contentType(MediaType.APPLICATION_JSON)
                                         .content(
                                                 """
@@ -117,7 +120,7 @@ class EthicsApiIT extends ApiTestSupport {
                 "$.id");
     }
 
-    private String etagOfSubmission(String submissionId, Cookie who) throws Exception {
+    private String etagOfSubmission(String submissionId, Cookie[] who) throws Exception {
         return mockMvc.perform(get("/api/v1/ethics/submissions/" + submissionId).cookie(who))
                 .andExpect(status().isOk())
                 .andReturn()
@@ -146,11 +149,12 @@ class EthicsApiIT extends ApiTestSupport {
     @Test
     void anInvestigatorCannotSubmitOnBehalfOfATrialTheyAreNotAssignedTo() throws Exception {
         givenATrialAwaitingEthics();
-        Cookie stranger = loginAs("PRINCIPAL_INVESTIGATOR");
+        Cookie[] stranger = loginAs("PRINCIPAL_INVESTIGATOR");
 
         mockMvc.perform(
                         post("/api/v1/ethics/submissions")
                                 .cookie(stranger)
+                                .with(csrf(stranger))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         """
@@ -197,11 +201,12 @@ class EthicsApiIT extends ApiTestSupport {
     void theCommitteeRecordsAReview() throws Exception {
         givenATrialAwaitingEthics();
         String submissionId = submitToCommittee();
-        Cookie member = loginAs("ETHICS_MEMBER", hostInstitution);
+        Cookie[] member = loginAs("ETHICS_MEMBER", hostInstitution);
 
         mockMvc.perform(
                         post("/api/v1/ethics/reviews")
                                 .cookie(member)
+                                .with(csrf(member))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         """
@@ -239,7 +244,7 @@ class EthicsApiIT extends ApiTestSupport {
         givenATrialAwaitingEthics();
         String submissionId = submitToCommittee();
         recordReview(submissionId, "APPROVE");
-        Cookie regulator = loginAs("REGULATORY_OFFICER");
+        Cookie[] regulator = loginAs("REGULATORY_OFFICER");
 
         mockMvc.perform(get("/api/v1/ethics/submissions/" + submissionId).cookie(regulator))
                 .andExpect(status().isOk());
@@ -250,9 +255,11 @@ class EthicsApiIT extends ApiTestSupport {
     }
 
     private void recordReview(String submissionId, String recommendation) throws Exception {
+        Cookie[] member = loginAs("ETHICS_MEMBER", hostInstitution);
         mockMvc.perform(
                         post("/api/v1/ethics/reviews")
-                                .cookie(loginAs("ETHICS_MEMBER", hostInstitution))
+                                .cookie(member)
+                                .with(csrf(member))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         """
@@ -271,9 +278,11 @@ class EthicsApiIT extends ApiTestSupport {
         // The WITH CHECK on ethics_reviews must consider the submission's institution, not
         // merely that the caller is on some committee. Otherwise a member elsewhere writes a
         // review onto a submission they cannot read, which the host committee then sees.
+        Cookie[] otherMember = loginAs("ETHICS_MEMBER", otherInstitution);
         mockMvc.perform(
                         post("/api/v1/ethics/reviews")
-                                .cookie(loginAs("ETHICS_MEMBER", otherInstitution))
+                                .cookie(otherMember)
+                                .with(csrf(otherMember))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         """
@@ -290,11 +299,12 @@ class EthicsApiIT extends ApiTestSupport {
     void theCommitteeRecordsItsDecision() throws Exception {
         givenATrialAwaitingEthics();
         String submissionId = submitToCommittee();
-        Cookie member = loginAs("ETHICS_MEMBER", hostInstitution);
+        Cookie[] member = loginAs("ETHICS_MEMBER", hostInstitution);
 
         mockMvc.perform(
                         post("/api/v1/ethics/submissions/" + submissionId + "/decision")
                                 .cookie(member)
+                                .with(csrf(member))
                                 .header(HttpHeaders.IF_MATCH, etagOfSubmission(submissionId, member))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
@@ -316,9 +326,11 @@ class EthicsApiIT extends ApiTestSupport {
         givenATrialAwaitingEthics();
         String submissionId = submitToCommittee();
 
+        Cookie[] member = loginAs("ETHICS_MEMBER", hostInstitution);
         mockMvc.perform(
                         post("/api/v1/ethics/submissions/" + submissionId + "/decision")
-                                .cookie(loginAs("ETHICS_MEMBER", hostInstitution))
+                                .cookie(member)
+                                .with(csrf(member))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"status\":\"APPROVED\"}"))
                 .andExpect(status().isPreconditionRequired());
@@ -328,13 +340,14 @@ class EthicsApiIT extends ApiTestSupport {
     void anApprovalWithConditionsMustRecordThem() throws Exception {
         givenATrialAwaitingEthics();
         String submissionId = submitToCommittee();
-        Cookie member = loginAs("ETHICS_MEMBER", hostInstitution);
+        Cookie[] member = loginAs("ETHICS_MEMBER", hostInstitution);
 
         // ck_ethics_submissions_conditions: an approval with conditions that records none is
         // not an auditable decision.
         mockMvc.perform(
                         post("/api/v1/ethics/submissions/" + submissionId + "/decision")
                                 .cookie(member)
+                                .with(csrf(member))
                                 .header(HttpHeaders.IF_MATCH, etagOfSubmission(submissionId, member))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"status\":\"APPROVED_WITH_CONDITIONS\"}"))
@@ -349,6 +362,7 @@ class EthicsApiIT extends ApiTestSupport {
         mockMvc.perform(
                         post("/api/v1/ethics/submissions/" + submissionId + "/decision")
                                 .cookie(investigator)
+                                .with(csrf(investigator))
                                 .header(HttpHeaders.IF_MATCH, "\"1\"")
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"status\":\"APPROVED\"}"))
@@ -363,6 +377,7 @@ class EthicsApiIT extends ApiTestSupport {
         mockMvc.perform(
                         post("/api/v1/ethics/submissions/" + submissionId + "/withdraw")
                                 .cookie(investigator)
+                                .with(csrf(investigator))
                                 .header(
                                         HttpHeaders.IF_MATCH,
                                         etagOfSubmission(submissionId, investigator)))

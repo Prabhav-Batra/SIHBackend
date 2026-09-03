@@ -28,8 +28,8 @@ class ComplianceApiIT extends ApiTestSupport {
 
     private static UUID institutionId;
 
-    private Cookie regulator;
-    private Cookie investigator;
+    private Cookie[] regulator;
+    private Cookie[] investigator;
     private String trialId;
 
     @BeforeEach
@@ -56,6 +56,7 @@ class ComplianceApiIT extends ApiTestSupport {
                         mockMvc.perform(
                                         post("/api/v1/trials")
                                                 .cookie(investigator)
+                                                .with(csrf(investigator))
                                                 .contentType(MediaType.APPLICATION_JSON)
                                                 .content(
                                                         """
@@ -75,6 +76,7 @@ class ComplianceApiIT extends ApiTestSupport {
                 mockMvc.perform(
                                 post("/api/v1/compliance/requirements")
                                         .cookie(regulator)
+                                        .with(csrf(regulator))
                                         .contentType(MediaType.APPLICATION_JSON)
                                         .content(
                                                 """
@@ -96,6 +98,7 @@ class ComplianceApiIT extends ApiTestSupport {
                 mockMvc.perform(
                                 post("/api/v1/compliance/trials/" + trialId + "/requirements")
                                         .cookie(regulator)
+                                        .with(csrf(regulator))
                                         .contentType(MediaType.APPLICATION_JSON)
                                         .content(
                                                 "{\"complianceRequirementId\":\"%s\"}"
@@ -111,8 +114,8 @@ class ComplianceApiIT extends ApiTestSupport {
     void theRequirementCatalogueIsReadableByEveryRole() throws Exception {
         String requirementId = defineRequirement(true);
 
-        for (Cookie who :
-                new Cookie[] {
+        for (Cookie[] who :
+                new Cookie[][] {
                     loginAs("PRINCIPAL_INVESTIGATOR"),
                     loginAs("TRIAL_COORDINATOR"),
                     loginAs("ETHICS_MEMBER", institutionId),
@@ -127,9 +130,11 @@ class ComplianceApiIT extends ApiTestSupport {
 
     @Test
     void anInvestigatorCannotDefineWhatCountsAsCompliance() throws Exception {
+        Cookie[] investigator = loginAs("PRINCIPAL_INVESTIGATOR");
         mockMvc.perform(
                         post("/api/v1/compliance/requirements")
-                                .cookie(loginAs("PRINCIPAL_INVESTIGATOR"))
+                                .cookie(investigator)
+                                .with(csrf(investigator))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         """
@@ -164,6 +169,7 @@ class ComplianceApiIT extends ApiTestSupport {
         mockMvc.perform(
                         post("/api/v1/compliance/trials/" + trialId + "/requirements")
                                 .cookie(regulator)
+                                .with(csrf(regulator))
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content(
                                         "{\"complianceRequirementId\":\"%s\"}"
@@ -226,6 +232,7 @@ class ComplianceApiIT extends ApiTestSupport {
                                         + trialComplianceId
                                         + "/status")
                                 .cookie(regulator)
+                                .with(csrf(regulator))
                                 .header(HttpHeaders.IF_MATCH, etag)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"status\":\"COMPLIANT\",\"notes\":\"Approval on file\"}"))
@@ -253,6 +260,7 @@ class ComplianceApiIT extends ApiTestSupport {
         mockMvc.perform(
                         post("/api/v1/compliance/trials/" + trialId + "/" + id + "/status")
                                 .cookie(investigator)
+                                .with(csrf(investigator))
                                 .header(HttpHeaders.IF_MATCH, "\"1\"")
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"status\":\"COMPLIANT\"}"))

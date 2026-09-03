@@ -10,4 +10,8 @@ dependencies {
     implementation("org.springframework.boot:spring-boot-starter-jdbc")
     implementation("org.springframework.boot:spring-boot-starter-validation")
     implementation("org.springframework.boot:spring-boot-starter-security")
+
+    // compileOnly: only for the @Schema disambiguation on the ComplianceSummary record, which
+    // collides by simple name with ctms-ethics's own (springdoc keys its registry that way).
+    compileOnly("io.swagger.core.v3:swagger-annotations-jakarta:2.2.28")
 }

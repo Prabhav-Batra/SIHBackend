@@ -1,5 +1,6 @@
 package com.sih26046.ctms.gis;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 import java.util.UUID;
 
@@ -88,6 +89,10 @@ public final class GisDtos {
 
     // ── drill-down (§11.3 Level 2/3) ─────────────────────────────────────────
 
+    // Disambiguates against ctms-ethics's own unrelated ComplianceSummary — springdoc keys
+    // its OpenAPI schema registry by simple class name, and the two would otherwise silently
+    // overwrite each other in the generated docs.
+    @Schema(name = "GisComplianceSummary")
     public record ComplianceSummary(long total, long compliant, long mandatoryOpen) {}
 
     /**

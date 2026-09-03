@@ -1,10 +1,13 @@
 package com.sih26046.ctms.clinical;
 
+import com.sih26046.ctms.audit.AuditTrail;
 import com.sih26046.ctms.security.CurrentUser;
 import jakarta.validation.Valid;
 import java.net.URI;
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
@@ -33,14 +36,17 @@ public class ParticipantController {
     private final EnrollmentService enrollment;
     private final ParticipantRepository participants;
     private final IdempotencyStore idempotency;
+    private final AuditTrail audit;
 
     public ParticipantController(
             EnrollmentService enrollment,
             ParticipantRepository participants,
-            IdempotencyStore idempotency) {
+            IdempotencyStore idempotency,
+            AuditTrail audit) {
         this.enrollment = enrollment;
         this.participants = participants;
         this.idempotency = idempotency;
+        this.audit = audit;
     }
 
     /**
@@ -126,16 +132,39 @@ public class ParticipantController {
     @PreAuthorize("hasAuthority('participant:withdraw')")
     @Transactional
     public ParticipantView withdraw(
-            @PathVariable UUID id, @RequestBody WithdrawRequest request) {
+            @PathVariable UUID id,
+            @RequestBody WithdrawRequest request,
+            @AuthenticationPrincipal CurrentUser caller) {
         ParticipantEntity participant =
                 participants
                         .findById(id)
                         .orElseThrow(
                                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Not found"));
+        Map<String, Object> before = valuesOf(participant);
         // §20.3 — withdrawal stops new data. It does not delete what was already collected:
         // the data gathered while the participant was consented remains part of the trial.
         participant.withdraw(request.reason());
-        return ParticipantView.of(participants.save(participant));
+        ParticipantEntity saved = participants.save(participant);
+
+        audit.recordChange(
+                caller.userId(),
+                "WITHDRAW_PARTICIPANT",
+                "participants",
+                saved.getId(),
+                saved.getTrialId(),
+                before,
+                valuesOf(saved));
+
+        return ParticipantView.of(saved);
+    }
+
+    private static Map<String, Object> valuesOf(ParticipantEntity p) {
+        Map<String, Object> values = new LinkedHashMap<>();
+        values.put("trialId", p.getTrialId());
+        values.put("trialSiteId", p.getTrialSiteId());
+        values.put("subjectCode", p.getSubjectCode());
+        values.put("status", p.getStatus());
+        return values;
     }
 
     @ExceptionHandler(EnrollmentService.TrialNotEnrollingException.class)

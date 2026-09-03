@@ -1,12 +1,15 @@
 package com.sih26046.ctms.safety;
 
+import com.sih26046.ctms.audit.AuditTrail;
 import com.sih26046.ctms.security.CurrentUser;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.net.URI;
 import java.time.LocalDate;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -30,10 +33,13 @@ public class SafetyController {
 
     private final AdverseEventRepository events;
     private final SafetyReviewRepository reviews;
+    private final AuditTrail audit;
 
-    public SafetyController(AdverseEventRepository events, SafetyReviewRepository reviews) {
+    public SafetyController(
+            AdverseEventRepository events, SafetyReviewRepository reviews, AuditTrail audit) {
         this.events = events;
         this.reviews = reviews;
+        this.audit = audit;
     }
 
     public record ReportEvent(
@@ -129,6 +135,26 @@ public class SafetyController {
                                         : request.seriousCriteria().toArray(String[]::new),
                                 caller.userId()));
 
+        // description is free-text clinical narrative — Redaction masks it by field name
+        // (§19.5); the real value is passed through here rather than pre-redacted.
+        Map<String, Object> newValues = new LinkedHashMap<>();
+        newValues.put("participantId", saved.getParticipantId());
+        newValues.put("visitId", request.visitId());
+        newValues.put("eventTerm", saved.getEventTerm());
+        newValues.put("description", saved.getDescription());
+        newValues.put("onsetDate", saved.getOnsetDate());
+        newValues.put("severity", saved.getSeverity());
+        newValues.put("seriousness", saved.getSeriousness());
+        newValues.put("status", saved.getStatus());
+        audit.recordChange(
+                caller.userId(),
+                "CREATE_ADVERSE_EVENT",
+                "adverse_events",
+                saved.getId(),
+                saved.getTrialId(),
+                null,
+                newValues);
+
         return ResponseEntity.created(URI.create("/api/v1/adverse-events/" + saved.getId()))
                 .body(EventView.of(saved));
     }
@@ -213,6 +239,25 @@ public class SafetyController {
 
         event.recordReview(request.assessedCausality());
         events.save(event);
+
+        // comments is free-text deliberation narrative — Redaction masks it by field name
+        // (§19.5); the real value is passed through here rather than pre-redacted.
+        Map<String, Object> newValues = new LinkedHashMap<>();
+        newValues.put("adverseEventId", saved.getAdverseEventId());
+        newValues.put("assessedSeverity", saved.getAssessedSeverity());
+        newValues.put("assessedCausality", saved.getAssessedCausality());
+        newValues.put("isExpected", saved.isExpected());
+        newValues.put("requiresExpeditedReporting", saved.isRequiresExpeditedReporting());
+        newValues.put("comments", request.comments());
+        newValues.put("decision", saved.getDecision());
+        audit.recordChange(
+                caller.userId(),
+                "REVIEW_ADVERSE_EVENT",
+                "safety_reviews",
+                saved.getId(),
+                event.getTrialId(),
+                null,
+                newValues);
 
         return ResponseEntity.status(HttpStatus.CREATED).body(ReviewView.of(saved));
     }

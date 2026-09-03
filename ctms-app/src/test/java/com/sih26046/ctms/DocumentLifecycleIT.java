@@ -82,7 +82,7 @@ class DocumentLifecycleIT extends ApiTestSupport {
 
     private static UUID institutionId;
 
-    private Cookie investigator;
+    private Cookie[] investigator;
     private String trialId;
 
     @BeforeEach
@@ -109,6 +109,7 @@ class DocumentLifecycleIT extends ApiTestSupport {
                         mockMvc.perform(
                                         post("/api/v1/trials")
                                                 .cookie(investigator)
+                                                .with(csrf(investigator))
                                                 .contentType(MediaType.APPLICATION_JSON)
                                                 .content(
                                                         """
@@ -138,7 +139,8 @@ class DocumentLifecycleIT extends ApiTestSupport {
                                         .param("trialId", trialId)
                                         .param("documentType", "PROTOCOL")
                                         .param("title", "Study protocol")
-                                        .cookie(investigator))
+                                        .cookie(investigator)
+                                        .with(csrf(investigator)))
                         .andExpect(status().isCreated())
                         .andReturn(),
                 "$.id");
@@ -155,7 +157,8 @@ class DocumentLifecycleIT extends ApiTestSupport {
                                                         "application/pdf",
                                                         content))
                                         .param("title", "Study protocol, amendment 1")
-                                        .cookie(investigator))
+                                        .cookie(investigator)
+                                        .with(csrf(investigator)))
                         .andExpect(status().isCreated())
                         .andReturn(),
                 "$.id");
@@ -166,7 +169,10 @@ class DocumentLifecycleIT extends ApiTestSupport {
     }
 
     private void publish(String documentId) throws Exception {
-        mockMvc.perform(post("/api/v1/documents/" + documentId + "/publish").cookie(investigator))
+        mockMvc.perform(
+                        post("/api/v1/documents/" + documentId + "/publish")
+                                .cookie(investigator)
+                                .with(csrf(investigator)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CURRENT"));
     }
@@ -268,7 +274,10 @@ class DocumentLifecycleIT extends ApiTestSupport {
     void anUnscannedVersionCannotBePublished() throws Exception {
         String v1 = uploadV1();
 
-        mockMvc.perform(post("/api/v1/documents/" + v1 + "/publish").cookie(investigator))
+        mockMvc.perform(
+                        post("/api/v1/documents/" + v1 + "/publish")
+                                .cookie(investigator)
+                                .with(csrf(investigator)))
                 .andExpect(status().isConflict());
     }
 
@@ -278,7 +287,10 @@ class DocumentLifecycleIT extends ApiTestSupport {
         scanner.verdict = ScanVerdict.INFECTED;
         scanClean();
 
-        mockMvc.perform(post("/api/v1/documents/" + v1 + "/publish").cookie(investigator))
+        mockMvc.perform(
+                        post("/api/v1/documents/" + v1 + "/publish")
+                                .cookie(investigator)
+                                .with(csrf(investigator)))
                 .andExpect(status().isConflict());
         assertThat(statusOf(v1)).isEqualTo("QUARANTINED");
     }

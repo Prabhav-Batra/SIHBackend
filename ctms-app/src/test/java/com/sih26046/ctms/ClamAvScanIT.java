@@ -100,7 +100,7 @@ class ClamAvScanIT extends ApiTestSupport {
 
     private static UUID institutionId;
 
-    private Cookie investigator;
+    private Cookie[] investigator;
     private String trialId;
 
     @BeforeAll
@@ -156,6 +156,7 @@ class ClamAvScanIT extends ApiTestSupport {
                         mockMvc.perform(
                                         post("/api/v1/trials")
                                                 .cookie(investigator)
+                                                .with(csrf(investigator))
                                                 .contentType(MediaType.APPLICATION_JSON)
                                                 .content(
                                                         """
@@ -178,7 +179,8 @@ class ClamAvScanIT extends ApiTestSupport {
                                 .param("trialId", trialId)
                                 .param("documentType", "PROTOCOL")
                                 .param("title", "Study protocol")
-                                .cookie(investigator))
+                                .cookie(investigator)
+                                .with(csrf(investigator)))
                 .andReturn();
     }
 

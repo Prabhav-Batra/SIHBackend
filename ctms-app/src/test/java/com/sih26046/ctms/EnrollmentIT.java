@@ -28,7 +28,7 @@ class EnrollmentIT extends ApiTestSupport {
     private static UUID institutionId;
     private static boolean seeded;
 
-    private Cookie investigator;
+    private Cookie[] investigator;
     private String trialId;
     private String siteId;
 
@@ -56,6 +56,7 @@ class EnrollmentIT extends ApiTestSupport {
                 mockMvc.perform(
                                 post("/api/v1/trials")
                                         .cookie(investigator)
+                                        .with(csrf(investigator))
                                         .contentType(MediaType.APPLICATION_JSON)
                                         .content(
                                                 """
@@ -76,6 +77,7 @@ class EnrollmentIT extends ApiTestSupport {
                         mockMvc.perform(
                                         post("/api/v1/sites")
                                                 .cookie(investigator)
+                                                .with(csrf(investigator))
                                                 .contentType(MediaType.APPLICATION_JSON)
                                                 .content(
                                                         """
@@ -112,6 +114,7 @@ class EnrollmentIT extends ApiTestSupport {
         mockMvc.perform(
                         post("/api/v1/trials/" + trialId + "/status")
                                 .cookie(investigator)
+                                .with(csrf(investigator))
                                 .header("If-Match", etag)
                                 .contentType(MediaType.APPLICATION_JSON)
                                 .content("{\"status\":\"%s\"}".formatted(status)))
@@ -122,6 +125,7 @@ class EnrollmentIT extends ApiTestSupport {
         var request =
                 post("/api/v1/participants")
                         .cookie(investigator)
+                        .with(csrf(investigator))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(
                                 """
@@ -195,6 +199,7 @@ class EnrollmentIT extends ApiTestSupport {
                 mockMvc.perform(
                                 post("/api/v1/trials")
                                         .cookie(investigator)
+                                        .with(csrf(investigator))
                                         .contentType(MediaType.APPLICATION_JSON)
                                         .content(
                                                 """
@@ -211,6 +216,7 @@ class EnrollmentIT extends ApiTestSupport {
                         mockMvc.perform(
                                         post("/api/v1/sites")
                                                 .cookie(investigator)
+                                                .with(csrf(investigator))
                                                 .contentType(MediaType.APPLICATION_JSON)
                                                 .content(
                                                         """
@@ -271,6 +277,7 @@ class EnrollmentIT extends ApiTestSupport {
                 mockMvc.perform(
                                 post("/api/v1/participants")
                                         .cookie(investigator)
+                                        .with(csrf(investigator))
                                         .contentType(MediaType.APPLICATION_JSON)
                                         .content(
                                                 """

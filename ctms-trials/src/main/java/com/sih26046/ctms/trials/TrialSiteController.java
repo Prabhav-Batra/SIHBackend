@@ -1,15 +1,19 @@
 package com.sih26046.ctms.trials;
 
+import com.sih26046.ctms.audit.AuditTrail;
+import com.sih26046.ctms.security.CurrentUser;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import java.net.URI;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,9 +30,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class TrialSiteController {
 
     private final TrialSiteRepository sites;
+    private final AuditTrail audit;
 
-    public TrialSiteController(TrialSiteRepository sites) {
+    public TrialSiteController(TrialSiteRepository sites, AuditTrail audit) {
         this.sites = sites;
+        this.audit = audit;
     }
 
     public record CreateSite(
@@ -69,7 +75,8 @@ public class TrialSiteController {
     @PostMapping
     @PreAuthorize("hasAuthority('site:create')")
     @Transactional
-    public ResponseEntity<SiteView> create(@Valid @RequestBody CreateSite request) {
+    public ResponseEntity<SiteView> create(
+            @Valid @RequestBody CreateSite request, @AuthenticationPrincipal CurrentUser caller) {
         TrialSiteEntity site =
                 new TrialSiteEntity(
                         UUID.randomUUID(),
@@ -79,6 +86,20 @@ public class TrialSiteController {
         site.setTargetEnrollment(request.targetEnrollment());
 
         TrialSiteEntity saved = sites.saveAndFlush(site);
+
+        audit.recordChange(
+                caller.userId(),
+                "CREATE_SITE",
+                "trial_sites",
+                saved.getId(),
+                saved.getTrialId(),
+                null,
+                Map.of(
+                        "trialId", saved.getTrialId(),
+                        "institutionId", saved.getInstitutionId(),
+                        "siteCode", saved.getSiteCode(),
+                        "status", saved.getStatus()));
+
         return ResponseEntity.created(URI.create("/api/v1/sites/" + saved.getId()))
                 .eTag("\"%d\"".formatted(saved.getVersion()))
                 .body(SiteView.of(saved));

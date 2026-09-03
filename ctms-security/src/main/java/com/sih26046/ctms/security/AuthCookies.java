@@ -13,11 +13,19 @@ import org.springframework.http.ResponseCookie;
  *
  * <p>Both are {@code HttpOnly}: an XSS defect can then act within the page but cannot
  * exfiltrate a credential for offline reuse. Tokens are never placed in {@code localStorage}.
+ *
+ * <p>The third cookie, {@code csrf_token} (§18.12), is the opposite on purpose: it is
+ * deliberately readable by JavaScript. It is not a credential — it is a value the legitimate
+ * first-party page must be able to read and echo back in an {@code X-CSRF-Token} header. Its
+ * security comes from the same-origin policy stopping a foreign page from reading it, not from
+ * secrecy the way the other two cookies work.
  */
 public final class AuthCookies {
 
     public static final String ACCESS_COOKIE = "access_token";
     public static final String REFRESH_COOKIE = "refresh_token";
+    public static final String CSRF_COOKIE = "csrf_token";
+    public static final String CSRF_HEADER = "X-CSRF-Token";
     public static final String REFRESH_PATH = "/api/v1/auth/refresh";
 
     private AuthCookies() {}
@@ -49,5 +57,19 @@ public final class AuthCookies {
 
     public static ResponseCookie clearRefresh() {
         return refresh("", Duration.ZERO);
+    }
+
+    public static ResponseCookie csrf(String token, Duration maxAge) {
+        return ResponseCookie.from(CSRF_COOKIE, token)
+                .httpOnly(false)
+                .secure(true)
+                .sameSite("Lax")
+                .path("/")
+                .maxAge(maxAge)
+                .build();
+    }
+
+    public static ResponseCookie clearCsrf() {
+        return csrf("", Duration.ZERO);
     }
 }
