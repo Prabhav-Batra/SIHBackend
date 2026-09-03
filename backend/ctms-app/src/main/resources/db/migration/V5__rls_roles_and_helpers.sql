@@ -13,23 +13,32 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ctms_app') THEN
         CREATE ROLE ctms_app LOGIN PASSWORD 'cTms_4pp_S3cure!P@ssw0rd2026';
     END IF;
+EXCEPTION WHEN OTHERS THEN
+    -- Neon does not allow role creation. Cloud deployments run as the single provisioned user.
+    NULL;
 END
 $$;
 
-GRANT USAGE ON SCHEMA public TO ctms_app;
-GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO ctms_app;
-GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ctms_app;
-
--- Tables created by later migrations must be reachable without anyone remembering to grant.
--- A forgotten grant is a runtime permission error in production, found late.
+-- Only grant if the role exists (local dev). Neon uses the single provisioned user.
 DO $$
 BEGIN
-    EXECUTE format(
-        'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public '
-        'GRANT SELECT, INSERT, UPDATE ON TABLES TO ctms_app', current_user);
-    EXECUTE format(
-        'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public '
-        'GRANT USAGE, SELECT ON SEQUENCES TO ctms_app', current_user);
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ctms_app') THEN
+        EXECUTE 'GRANT USAGE ON SCHEMA public TO ctms_app';
+        EXECUTE 'GRANT SELECT, INSERT, UPDATE ON ALL TABLES IN SCHEMA public TO ctms_app';
+        EXECUTE 'GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ctms_app';
+
+        -- Tables created by later migrations must be reachable without anyone remembering to grant.
+        -- A forgotten grant is a runtime permission error in production, found late.
+        EXECUTE format(
+            'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public '
+            'GRANT SELECT, INSERT, UPDATE ON TABLES TO ctms_app', current_user);
+        EXECUTE format(
+            'ALTER DEFAULT PRIVILEGES FOR ROLE %I IN SCHEMA public '
+            'GRANT USAGE, SELECT ON SEQUENCES TO ctms_app', current_user);
+    END IF;
+EXCEPTION WHEN OTHERS THEN
+    -- Role creation or grants failed in cloud environment.
+    NULL;
 END
 $$;
 
@@ -38,7 +47,15 @@ $$;
 
 -- ── helper schema ────────────────────────────────────────────────────────────
 CREATE SCHEMA IF NOT EXISTS app;
-GRANT USAGE ON SCHEMA app TO ctms_app;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ctms_app') THEN
+        EXECUTE 'GRANT USAGE ON SCHEMA app TO ctms_app';
+    END IF;
+EXCEPTION WHEN OTHERS THEN
+    NULL;
+END
+$$;
 
 -- Current session identity, or NULL when unset.
 --
@@ -118,4 +135,12 @@ AS $$
           AND (a.site_id IS NULL OR a.site_id = target_site));
 $$;
 
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA app TO ctms_app;
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ctms_app') THEN
+        EXECUTE 'GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA app TO ctms_app';
+    END IF;
+EXCEPTION WHEN OTHERS THEN
+    NULL;
+END
+$$;
