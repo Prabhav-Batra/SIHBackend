@@ -11,7 +11,7 @@
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ctms_app') THEN
-        CREATE ROLE ctms_app LOGIN PASSWORD 'ctms_app';
+        CREATE ROLE ctms_app LOGIN PASSWORD 'cTms_4pp_S3cure!P@ssw0rd2026';
     END IF;
 END
 $$;
