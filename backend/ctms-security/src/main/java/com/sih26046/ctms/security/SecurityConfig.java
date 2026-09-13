@@ -14,6 +14,9 @@ import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 import org.springframework.security.web.header.writers.StaticHeadersWriter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 /**
  * The filter chain (§6.4, §18).
@@ -32,13 +35,36 @@ public class SecurityConfig {
     }
 
     @Bean
+    public CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOrigins(
+                java.util.Arrays.asList(
+                        "http://localhost:3000",
+                        "http://localhost:5173",
+                        "https://*.vercel.app"));
+        config.setAllowedMethods(java.util.Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"));
+        config.setAllowedHeaders(java.util.Arrays.asList("*"));
+        config.setExposedHeaders(
+                java.util.Arrays.asList("X-CSRF-TOKEN", "ETag", "Set-Cookie", "X-Request-Id"));
+        config.setAllowCredentials(true);
+        config.setMaxAge(3600L);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", config);
+        return source;
+    }
+
+    @Bean
     public SecurityFilterChain filterChain(
             HttpSecurity http,
             AccessTokenAuthFilter authFilter,
             RateLimiter rateLimiter,
-            ObjectMapper mapper)
+            ObjectMapper mapper,
+            CorsConfigurationSource corsConfigurationSource)
             throws Exception {
         return http
+                // CORS must come before CSRF to properly handle preflight OPTIONS requests.
+                .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 // Authentication is by cookie-borne JWT; there is no server-side HTTP session
                 // to fixate, and no form or basic login to fall back to.
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

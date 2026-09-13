@@ -1,18 +1,21 @@
-# Deployed profile: Oracle Always Free VM -> Supabase/Neon Postgres (spec §4).
-# Unlike local dev (two identities: owner + app), cloud databases give one connection.
+# Deployed profile: Oracle Always Free VM / Render -> Neon Postgres (spec §4).
+# Same two-identity model as local dev (§7.7): the owner runs migrations and is exempt from
+# RLS by nature of owning the schema; the app must connect as the unprivileged role or
+# RlsConnectionGuard refuses to start (every policy would be silently inert otherwise).
+# ctms_app is created by hand in the Neon console (their control plane rejects CREATE ROLE
+# ... PASSWORD run via raw SQL), same as the Supabase note in V5's migration.
 spring:
   datasource:
-    # Supavisor/Neon pooler, transaction mode. prepareThreshold=0 is required: transaction
-    # pooling and server-side prepared statements do not mix (spec §6.2).
+    # Neon pooler, transaction mode. prepareThreshold=0 is required: transaction pooling and
+    # server-side prepared statements do not mix (spec §6.2).
     url: ${CTMS_DB_URL}?prepareThreshold=0&sslmode=require
     username: ${CTMS_DB_USER}
     password: ${CTMS_DB_PASSWORD}
     hikari:
       maximum-pool-size: ${CTMS_DB_POOL_MAX:10}
-  # Flyway: use the same credentials as the app (no separate owner user in cloud).
   flyway:
-    user: ${CTMS_DB_USER}
-    password: ${CTMS_DB_PASSWORD}
+    user: ${CTMS_DB_OWNER_USER}
+    password: ${CTMS_DB_OWNER_PASSWORD}
   jpa:
     properties:
       hibernate:

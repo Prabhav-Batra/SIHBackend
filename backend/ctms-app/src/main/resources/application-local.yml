@@ -7,7 +7,8 @@ spring:
   datasource:
     url: jdbc:postgresql://localhost:5432/ctms
     username: ctms_app
-    password: ctms_app
+    # Must match the password V5 gives the role when it creates it on a fresh database.
+    password: "cTms_4pp_S3cure!P@ssw0rd2026"
   flyway:
     user: ctms
     password: ctms

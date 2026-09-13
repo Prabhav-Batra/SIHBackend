@@ -9,7 +9,28 @@
       "Bash(pkill -9 gradle)",
       "Bash(export CTMS_JWT_SECRET=\"this-is-a-32-byte-secret-string!\")",
       "Bash(./gradlew :ctms-app:test --rerun-tasks)",
-      "Bash(bash /private/tmp/claude-501/-Users-prabhavbatra-Documents-Programming-SIH26046/8a243e96-5878-4ec3-bd1d-5c7624579b29/scratchpad/comprehensive_test.sh)"
+      "Bash(bash /private/tmp/claude-501/-Users-prabhavbatra-Documents-Programming-SIH26046/8a243e96-5878-4ec3-bd1d-5c7624579b29/scratchpad/comprehensive_test.sh)",
+      "Bash(ls /Users/prabhavbatra/.claude/projects/-Users-prabhavbatra-Documents-Programming-SIH26046/memory/ 2>/dev/null; echo \"---\"; ls /private/tmp/claude-501/-Users-prabhavbatra-Documents-Programming-SIH26046/ 2>/dev/null)",
+      "Read(//private/tmp/claude-501/-Users-prabhavbatra-Documents-Programming-SIH26046/**)",
+      "Bash(docker compose *)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:8080/actuator/health)",
+      "Bash(curl -s http://localhost:8080/actuator/health)",
+      "Read(//private/tmp/**)",
+      "Bash(rm -f ctms_cookies.txt)",
+      "Bash(curl -s -i -c ctms_cookies.txt -X POST http://localhost:8080/api/v1/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"admin@ctms.local\",\"password\":\"ChangeMe123!\"}')",
+      "Bash(grep -n -A 20 \"POST /api/v1/institutions\\\\`\" TEST.md)",
+      "Bash(curl -s http://localhost:8080/v3/api-docs)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\('securitySchemes:', list\\(d.get\\('components',{}\\).get\\('securitySchemes',{}\\).keys\\(\\)\\)\\); print\\('scheme:', d['components']['securitySchemes'].get\\('csrfToken'\\)\\); print\\('paths:', len\\(d['paths']\\)\\); print\\('tags:', sorted\\({t for p in d['paths'].values\\(\\) for op in p.values\\(\\) if isinstance\\(op,dict\\) for t in op.get\\('tags',[]\\)}\\)\\)\")",
+      "Bash(kill 78187)",
+      "Bash(lsof -nP -iTCP:8080 -sTCP:LISTEN)",
+      "Bash(bash /private/tmp/claude-501/-Users-prabhavbatra-Documents-Programming-SIH26046/479d2aff-66a5-439e-a21b-75e4c5eddac1/scratchpad/verify.sh)",
+      "Bash(rm -f jar)",
+      "Bash(curl -s -o /dev/null -c jar -X POST http://localhost:8080/api/v1/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"admin@ctms.local\",\"password\":\"ChangeMe123!\"}')",
+      "Bash(curl -s -b jar -X POST http://localhost:8080/api/v1/institutions -H 'Content-Type: application/json' -d '{\"name\":\"Should Fail 2\",\"institutionType\":\"CRO\",\"city\":\"X\",\"state\":\"Y\"}' -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Bash(curl -s -b jar -X POST http://localhost:8080/api/v1/institutions -H 'Content-Type: application/json' -H 'X-CSRF-Token: not-the-real-token' -d '{\"name\":\"Should Fail 3\",\"institutionType\":\"CRO\",\"city\":\"X\",\"state\":\"Y\"}' -w \"\\\\nHTTP %{http_code}\\\\n\")",
+      "Bash(kill %1)",
+      "Bash(pkill -f \"CtmsApplication\")",
+      "Bash(./gradlew :ctms-security:compileJava -q)"
     ]
   }
 }
