@@ -57,6 +57,17 @@ ctms:
     jwt-secret: ${CTMS_JWT_SECRET}
     access-token-ttl: ${CTMS_JWT_ACCESS_TTL:15m}
     refresh-token-ttl: ${CTMS_JWT_REFRESH_TTL:14d}
+    # §18.3. Lax is correct when the frontend is served from the same site as the API. A
+    # separately hosted frontend (including a dev server on localhost calling the deployed
+    # API) is cross-site, and no browser sends a Lax cookie on a cross-site fetch — set this
+    # to None there, and only together with ctms.cors.allowed-origins below.
+    cookie-same-site: ${CTMS_COOKIE_SAME_SITE:Lax}
+
+  # Empty by default, which leaves CORS off entirely — the right setting for a same-origin
+  # deployment behind one Caddy vhost. Comma-separated exact origins; '*' is rejected at
+  # startup because a credentialed response cannot carry a wildcard origin.
+  cors:
+    allowed-origins: ${CTMS_CORS_ALLOWED_ORIGINS:}
 
 management:
   endpoints:

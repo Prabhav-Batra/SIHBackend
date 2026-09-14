@@ -3,6 +3,8 @@ package com.sih26046.ctms.security;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sih26046.ctms.security.ratelimit.RateLimitFilter;
 import com.sih26046.ctms.security.ratelimit.RateLimiter;
+import java.util.List;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
@@ -14,6 +16,8 @@ import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.security.web.header.writers.ReferrerPolicyHeaderWriter;
 import org.springframework.security.web.header.writers.StaticHeadersWriter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
 
 /**
  * The filter chain (§6.4, §18).
@@ -23,6 +27,7 @@ import org.springframework.security.web.header.writers.StaticHeadersWriter;
  */
 @Configuration
 @EnableMethodSecurity
+@EnableConfigurationProperties(CorsProperties.class)
 public class SecurityConfig {
 
     @Bean
@@ -36,9 +41,16 @@ public class SecurityConfig {
             HttpSecurity http,
             AccessTokenAuthFilter authFilter,
             RateLimiter rateLimiter,
-            ObjectMapper mapper)
+            ObjectMapper mapper,
+            CorsConfigurationSource corsSource)
             throws Exception {
         return http
+                // Must come before authorization: a browser preflight is an unauthenticated,
+                // credential-less OPTIONS, so without this Spring's CorsFilter never answers it
+                // and anyRequest().authenticated() turns it into a 401 the frontend reports as
+                // a failed login. The source returns null unless ctms.cors.allowed-origins is
+                // set, so a same-origin deployment behaves exactly as before.
+                .cors(cors -> cors.configurationSource(corsSource))
                 // Authentication is by cookie-borne JWT; there is no server-side HTTP session
                 // to fixate, and no form or basic login to fall back to.
                 .sessionManagement(s -> s.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -119,5 +131,33 @@ public class SecurityConfig {
                 .addFilterAfter(new CsrfDoubleSubmitFilter(mapper), AccessTokenAuthFilter.class)
                 .addFilterAfter(new RateLimitFilter(rateLimiter, mapper), CsrfDoubleSubmitFilter.class)
                 .build();
+    }
+
+    /**
+     * Returns a configuration only for origins named in {@code ctms.cors.allowed-origins}, and
+     * {@code null} for every other request — which is how Spring's {@code CorsFilter} is told
+     * "this is not a CORS request I handle" and leaves the response untouched.
+     */
+    @Bean
+    public CorsConfigurationSource corsConfigurationSource(CorsProperties properties) {
+        if (!properties.enabled()) {
+            return request -> null;
+        }
+
+        CorsConfiguration config = new CorsConfiguration();
+        config.setAllowedOrigins(properties.allowedOrigins());
+        config.setAllowedMethods(
+                List.of("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"));
+        // The CSRF double-submit header (§18.12) is not a CORS-safelisted request header, so it
+        // has to be named here or every mutating call fails its preflight.
+        config.setAllowedHeaders(
+                List.of("Content-Type", "Accept", AuthCookies.CSRF_HEADER, "X-Request-Id"));
+        config.setExposedHeaders(List.of("X-Request-Id"));
+        // The whole point: without this the browser sends no cookies and honours no Set-Cookie
+        // on the response, so login would appear to succeed and every later call would 401.
+        config.setAllowCredentials(true);
+        config.setMaxAge(3600L);
+
+        return request -> config;
     }
 }

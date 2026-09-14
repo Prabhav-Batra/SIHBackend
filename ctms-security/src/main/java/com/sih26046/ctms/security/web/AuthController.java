@@ -106,9 +106,9 @@ public class AuthController {
             refreshTokens.revoke(current.sessionId(), SessionRevocationReason.LOGOUT);
         }
         return ResponseEntity.noContent()
-                .header(HttpHeaders.SET_COOKIE, AuthCookies.clearAccess().toString())
-                .header(HttpHeaders.SET_COOKIE, AuthCookies.clearRefresh().toString())
-                .header(HttpHeaders.SET_COOKIE, AuthCookies.clearCsrf().toString())
+                .header(HttpHeaders.SET_COOKIE, clearAccessCookie())
+                .header(HttpHeaders.SET_COOKIE, clearRefreshCookie())
+                .header(HttpHeaders.SET_COOKIE, clearCsrfCookie())
                 .build();
     }
 
@@ -132,8 +132,8 @@ public class AuthController {
     @ExceptionHandler(RefreshTokenReuseException.class)
     public ResponseEntity<AuthDtos.ErrorResponse> onReuse() {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .header(HttpHeaders.SET_COOKIE, AuthCookies.clearAccess().toString())
-                .header(HttpHeaders.SET_COOKIE, AuthCookies.clearRefresh().toString())
+                .header(HttpHeaders.SET_COOKIE, clearAccessCookie())
+                .header(HttpHeaders.SET_COOKIE, clearRefreshCookie())
                 .body(
                         AuthDtos.ErrorResponse.of(
                                 "SESSION_REVOKED", "Please sign in again"));
@@ -146,11 +146,27 @@ public class AuthController {
     }
 
     private String accessCookie(String token) {
-        return AuthCookies.access(token, properties.accessTokenTtl()).toString();
+        return AuthCookies.access(token, properties.accessTokenTtl(), sameSite()).toString();
     }
 
     private String refreshCookie(String token) {
-        return AuthCookies.refresh(token, properties.refreshTokenTtl()).toString();
+        return AuthCookies.refresh(token, properties.refreshTokenTtl(), sameSite()).toString();
+    }
+
+    private String clearAccessCookie() {
+        return AuthCookies.clearAccess(sameSite()).toString();
+    }
+
+    private String clearRefreshCookie() {
+        return AuthCookies.clearRefresh(sameSite()).toString();
+    }
+
+    private String clearCsrfCookie() {
+        return AuthCookies.clearCsrf(sameSite()).toString();
+    }
+
+    private String sameSite() {
+        return properties.cookieSameSite();
     }
 
     /**
@@ -162,7 +178,7 @@ public class AuthController {
         byte[] bytes = new byte[32];
         CSRF_RANDOM.nextBytes(bytes);
         String token = Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-        return AuthCookies.csrf(token, properties.accessTokenTtl()).toString();
+        return AuthCookies.csrf(token, properties.accessTokenTtl(), sameSite()).toString();
     }
 
     private static final SecureRandom CSRF_RANDOM = new SecureRandom();
