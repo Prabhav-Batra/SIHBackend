@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sih26046.ctms.security.ratelimit.RateLimitFilter;
 import com.sih26046.ctms.security.ratelimit.RateLimiter;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -42,7 +43,12 @@ public class SecurityConfig {
             AccessTokenAuthFilter authFilter,
             RateLimiter rateLimiter,
             ObjectMapper mapper,
-            CorsConfigurationSource corsSource)
+            // By name, not by type. Spring MVC's own HandlerMappingIntrospector is also a
+            // CorsConfigurationSource, so an unqualified parameter is ambiguous and the context
+            // refuses to start — and the plausible-looking alternative, letting Spring Security
+            // resolve the source itself, silently prefers the introspector (which serves
+            // @CrossOrigin annotations, of which this codebase has none) over the bean below.
+            @Qualifier("corsConfigurationSource") CorsConfigurationSource corsSource)
             throws Exception {
         return http
                 // Must come before authorization: a browser preflight is an unauthenticated,
